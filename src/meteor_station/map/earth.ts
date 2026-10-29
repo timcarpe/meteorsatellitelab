@@ -11,10 +11,23 @@ import countries from 'world-atlas/countries-110m.json';
 import type { Topology, GeometryCollection } from 'topojson-specification';
 import { SUNRISE, type Observer, type Pass } from '@meteor/core/models';
 import { positionAt, type Orbit } from '@meteor/orbit/propagation';
+import {
+  MAP_SIZE,
+  mapFrame,
+  overlapArea,
+  placeLabel,
+  textBox,
+  unitsPerPixel,
+  type Box,
+  type MapView,
+} from '@meteor/map/layout';
 
+export type { MapView } from '@meteor/map/layout';
 const NS = 'http://www.w3.org/2000/svg';
-export type MapView = 'sunrise' | 'global';
-const colors = ['#72e0e4', '#c2b6ff'];
+/** Colors come from CSS tokens (`.sat-1`, `.sat-2`) so the map, legend and UI agree. */
+const SATELLITE_CLASSES = ['sat-1', 'sat-2'];
+/** On-screen text sizes in CSS pixels, independent of the rendered map width. */
+const TEXT = { region: 12, satellite: 13, campus: 14 } as const;
 const extent: [[number, number], [number, number]] = [
   [20, 14],
   [940, 388],
@@ -24,7 +37,7 @@ const projections = {
   sunrise: geoMercator()
     .center([SUNRISE.longitude, SUNRISE.latitude])
     .scale(1150)
-    .translate([480, 200])
+    .translate([MAP_SIZE.width / 2, 200])
     .clipExtent(extent),
 };
 const regionLabels: readonly [string, number, number][] = [
@@ -45,30 +58,27 @@ function svgElement<K extends keyof SVGElementTagNameMap>(
   return element;
 }
 
-function withinMap(point: [number, number] | null): point is [number, number] {
-  return (
-    point !== null &&
-    point[0] >= extent[0][0] &&
-    point[0] <= extent[1][0] &&
-    point[1] >= extent[0][1] &&
-    point[1] <= extent[1][1]
-  );
-}
-
 export class EarthMap {
   private view: MapView = 'sunrise';
+  private frame: Box = { x: 0, y: 0, ...MAP_SIZE };
+  private unit = 1;
+  private last: Parameters<EarthMap['render']> | null = null;
   private readonly base = svgElement('g', {});
+  private readonly regions = svgElement('g', { 'aria-hidden': 'true' });
   private readonly dynamic = svgElement('g', {});
   private readonly svg = svgElement('svg', {
-    viewBox: '0 0 960 400',
+    viewBox: `0 0 ${MAP_SIZE.width} ${MAP_SIZE.height}`,
     role: 'img',
+    class: 'earth-svg',
     'aria-label':
       'Earth map showing Meteor satellite positions and predicted ground tracks',
   });
-  public constructor(container: HTMLElement) {
-    this.svg.append(this.base, this.dynamic);
-    this.setView('sunrise');
+  public constructor(private readonly container: HTMLElement) {
+    this.svg.append(this.base, this.regions, this.dynamic);
     container.replaceChildren(this.svg);
+    this.setView('sunrise');
+    // Re-frame when the panel width changes so text stays a constant on-screen size.
+    new ResizeObserver(() => this.layout()).observe(container);
   }
 
   /** Change geographic framing without changing the selected pass or preview time. */
@@ -80,50 +90,19 @@ export class EarthMap {
         ? 'Regional map centred on VAS Sunrise in Ho Chi Minh City with Meteor ground tracks'
         : 'Global Earth map showing Meteor satellite positions and ground tracks',
     );
-    const projection = projections[view];
-    const path = geoPath(projection);
+    const path = geoPath(projections[view]);
     const topology = countries as unknown as Topology<{
       countries: GeometryCollection;
     }>;
-    const elements: SVGElement[] = [
-      svgElement('path', {
-        d: path({ type: 'Sphere' }) ?? '',
-        fill: '#18343a',
-        stroke: '#49695f',
-        'stroke-width': '1',
-      }),
-      svgElement('path', {
-        d: path(geoGraticule10()) ?? '',
-        fill: 'none',
-        stroke: '#2d4b45',
-        'stroke-width': '.7',
-      }),
+    this.base.replaceChildren(
+      svgElement('path', { d: path({ type: 'Sphere' }) ?? '', class: 'map-sphere' }),
+      svgElement('path', { d: path(geoGraticule10()) ?? '', class: 'map-graticule' }),
       svgElement('path', {
         d: path(feature(topology, topology.objects.countries)) ?? '',
-        fill: '#36594f',
-        stroke: '#59786a',
-        'stroke-width': '.8',
+        class: 'map-land',
       }),
-    ];
-    if (view === 'sunrise') {
-      for (const [name, longitude, latitude] of regionLabels) {
-        const point = projection([longitude, latitude]);
-        if (!withinMap(point) || point[1] < extent[0][1] + 18) continue;
-        const label = svgElement('text', {
-          x: `${point[0]}`,
-          y: `${point[1]}`,
-          fill: '#d4e2d7',
-          'font-size': '20',
-          'text-anchor': 'middle',
-          stroke: '#36594f',
-          'stroke-width': '3',
-          'paint-order': 'stroke',
-        });
-        label.textContent = name;
-        elements.push(label);
-      }
-    }
-    this.base.replaceChildren(...elements);
+    );
+    this.layout();
   }
 
   public render(
@@ -132,12 +111,62 @@ export class EarthMap {
     at: number,
     pass?: Pass,
   ): void {
+    this.last = [orbits, observer, at, pass];
     const mapProjection = projections[this.view];
     const path = geoPath(mapProjection);
+    const visible = this.visibleBounds();
+    const within = (point: [number, number] | null): point is [number, number] =>
+      point !== null &&
+      point[0] >= visible.x &&
+      point[0] <= visible.x + visible.width &&
+      point[1] >= visible.y &&
+      point[1] <= visible.y + visible.height;
     const school = mapProjection([observer.longitude, observer.latitude]);
-    const elements: SVGElement[] = [];
+    const tracks: SVGElement[] = [];
+    const markers: SVGElement[] = [];
+    const labels: SVGElement[] = [];
+    const occupied: Box[] = [];
+    const u = this.unit;
+    const markerBox = ([x, y]: [number, number], r: number): Box => ({
+      x: x - r,
+      y: y - r,
+      width: 2 * r,
+      height: 2 * r,
+    });
+    const label = (
+      text: string,
+      anchor: [number, number],
+      size: number,
+      className: string,
+    ): void => {
+      const fontSize = size * u;
+      const placement = placeLabel(
+        anchor,
+        textBox(text, fontSize),
+        12 * u,
+        occupied,
+        visible,
+      );
+      occupied.push(placement.box);
+      const element = svgElement('text', {
+        x: `${placement.x}`,
+        y: `${placement.y}`,
+        'text-anchor': placement.textAnchor,
+        'font-size': `${fontSize}`,
+        'stroke-width': `${3.5 * u}`,
+        class: `map-label ${className}`,
+      });
+      element.textContent = text;
+      labels.push(element);
+    };
+
+    if (within(school)) occupied.push(markerBox(school, 9 * u));
     orbits.forEach((orbit, index) => {
-      const color = colors[index % colors.length]!;
+      const satellite = SATELLITE_CLASSES[index % SATELLITE_CLASSES.length]!;
+      const dimmed = pass !== undefined && pass.norad !== orbit.norad;
+      const group = svgElement('g', {
+        class: `${satellite}${dimmed ? ' map-dimmed' : ''}`,
+      });
       const position = positionAt(orbit, at, observer);
       const before: [number, number][] = [],
         after: [number, number][] = [];
@@ -149,17 +178,14 @@ export class EarthMap {
         [before, false],
         [after, true],
       ] as const) {
-        elements.push(
+        group.append(
           svgElement('path', {
             d: path({ type: 'LineString', coordinates }) ?? '',
-            fill: 'none',
-            stroke: color,
-            'stroke-width': '2',
-            opacity: pass && pass.norad !== orbit.norad ? '0.25' : '0.8',
-            'stroke-dasharray': dashed ? '5 5' : 'none',
+            class: dashed ? 'map-track map-track-next' : 'map-track',
           }),
         );
       }
+      // Visibility footprint above 10° elevation for the current altitude.
       const radius =
         ((Math.acos((6371 * Math.cos(Math.PI / 18)) / (6371 + position.altitudeKm)) -
           Math.PI / 18) *
@@ -168,52 +194,26 @@ export class EarthMap {
       const footprint = geoCircle()
         .center([position.longitude, position.latitude])
         .radius(radius)();
-      elements.push(
-        svgElement('path', {
-          d: path(footprint) ?? '',
-          fill: color,
-          'fill-opacity': '0.07',
-          stroke: color,
-          'stroke-opacity': '0.4',
-          'stroke-width': '1',
-        }),
+      group.append(
+        svgElement('path', { d: path(footprint) ?? '', class: 'map-footprint' }),
       );
+      tracks.push(group);
       const point = mapProjection([position.longitude, position.latitude]);
-      if (withinMap(point)) {
-        elements.push(
-          svgElement('circle', {
-            cx: `${point[0]}`,
-            cy: `${point[1]}`,
-            r: '10',
-            fill: color,
-            'fill-opacity': '0.15',
-          }),
-        );
-        elements.push(
+      if (within(point)) {
+        const marker = svgElement('g', {
+          class: satellite,
+          transform: `translate(${point[0]},${point[1]}) scale(${u})`,
+        });
+        marker.append(
+          svgElement('circle', { r: '9', class: 'map-sat-halo' }),
           svgElement('path', {
             d: 'M-7,-4h4v8h-4zM3,-4h4v8h-4zM-2,-3h4v6h-4z',
-            fill: color,
-            transform: `translate(${point[0]},${point[1]}) rotate(-25)`,
+            class: 'map-sat',
+            transform: 'rotate(-25)',
           }),
         );
-        const leftLabel =
-          school !== null &&
-          point[0] < school[0] &&
-          Math.abs(point[0] - school[0]) < 160 &&
-          Math.abs(point[1] - school[1]) < 60;
-        const label = svgElement('text', {
-          x: `${leftLabel ? Math.max(150, point[0] - 16) : Math.min(800, point[0] + 16)}`,
-          y: `${Math.max(32, point[1] - 12)}`,
-          'text-anchor': leftLabel ? 'end' : 'start',
-          fill: color,
-          'font-size': '20',
-          'font-weight': '600',
-          stroke: '#18343a',
-          'stroke-width': '3',
-          'paint-order': 'stroke',
-        });
-        label.textContent = orbit.name;
-        elements.push(label);
+        markers.push(marker);
+        occupied.push(markerBox(point, 9 * u));
       }
     });
     if (pass) {
@@ -224,49 +224,95 @@ export class EarthMap {
           const p = positionAt(orbit, t, observer);
           coordinates.push([p.longitude, p.latitude]);
         }
-        elements.push(
+        tracks.push(
           svgElement('path', {
             d: path({ type: 'LineString', coordinates }) ?? '',
-            fill: 'none',
-            stroke: '#e2dcff',
-            'stroke-width': '4',
+            class: 'map-pass',
           }),
         );
       }
     }
-    if (withinMap(school)) {
-      elements.push(
-        svgElement('circle', {
-          cx: `${school[0]}`,
-          cy: `${school[1]}`,
-          r: '16',
-          fill: '#ffcf70',
-          'fill-opacity': '.12',
-        }),
-      );
-      elements.push(
-        svgElement('circle', {
-          cx: `${school[0]}`,
-          cy: `${school[1]}`,
-          r: '7',
-          fill: '#ffcf70',
-          stroke: '#18343a',
-          'stroke-width': '3',
-        }),
-      );
-      const label = svgElement('text', {
-        x: `${school[0] + 16}`,
-        y: `${school[1] + 23}`,
-        fill: '#ffda8a',
-        'font-size': '20',
-        'font-weight': '700',
-        stroke: '#18343a',
-        'stroke-width': '5',
-        'paint-order': 'stroke',
+    if (within(school)) {
+      const marker = svgElement('g', {
+        transform: `translate(${school[0]},${school[1]}) scale(${u})`,
       });
-      label.textContent = observer.name;
-      elements.push(label);
+      marker.append(
+        svgElement('circle', { r: '15', class: 'map-campus-halo' }),
+        svgElement('circle', { r: '6', class: 'map-campus' }),
+      );
+      markers.push(marker);
+      // The campus is the primary reference, so it claims its label position first.
+      label(observer.name, school, TEXT.campus, 'map-campus-label');
     }
-    this.dynamic.replaceChildren(...elements);
+    orbits.forEach((orbit, index) => {
+      const position = positionAt(orbit, at, observer);
+      const point = mapProjection([position.longitude, position.latitude]);
+      if (within(point))
+        label(
+          orbit.name,
+          point,
+          TEXT.satellite,
+          `map-sat-label ${SATELLITE_CLASSES[index % SATELLITE_CLASSES.length]}`,
+        );
+    });
+    this.dynamic.replaceChildren(...tracks, ...markers, ...labels);
+    this.renderRegions(occupied);
+  }
+
+  /** Context labels yield to the campus and satellites rather than overlapping them. */
+  private renderRegions(occupied: readonly Box[]): void {
+    const elements: SVGElement[] = [];
+    if (this.view === 'sunrise') {
+      const visible = this.visibleBounds();
+      const fontSize = TEXT.region * this.unit;
+      for (const [name, longitude, latitude] of regionLabels) {
+        const point = projections.sunrise([longitude, latitude]);
+        if (!point) continue;
+        const size = textBox(name, fontSize);
+        const box = {
+          x: point[0] - size.width / 2,
+          y: point[1] - size.height * 0.8,
+          ...size,
+        };
+        const fits =
+          box.x >= visible.x &&
+          box.y >= visible.y &&
+          box.x + box.width <= visible.x + visible.width &&
+          box.y + box.height <= visible.y + visible.height;
+        if (!fits || occupied.some((other) => overlapArea(box, other) > 0)) continue;
+        const label = svgElement('text', {
+          x: `${point[0]}`,
+          y: `${point[1]}`,
+          'font-size': `${fontSize}`,
+          'stroke-width': `${3 * this.unit}`,
+          'text-anchor': 'middle',
+          class: 'map-label map-region',
+        });
+        label.textContent = name;
+        elements.push(label);
+      }
+    }
+    this.regions.replaceChildren(...elements);
+  }
+
+  private visibleBounds(): Box {
+    const left = Math.max(this.frame.x, extent[0][0]);
+    const top = Math.max(this.frame.y, extent[0][1]);
+    return {
+      x: left,
+      y: top,
+      width: Math.min(this.frame.x + this.frame.width, extent[1][0]) - left,
+      height: Math.min(this.frame.y + this.frame.height, extent[1][1]) - top,
+    };
+  }
+
+  private layout(): void {
+    const width = this.container.clientWidth;
+    this.frame = mapFrame(this.view, width);
+    this.unit = unitsPerPixel(this.frame, width);
+    const { x, y, width: w, height: h } = this.frame;
+    this.svg.setAttribute('viewBox', `${x} ${y} ${w} ${h}`);
+    if (this.last) this.render(...this.last);
+    else this.renderRegions([]);
   }
 }

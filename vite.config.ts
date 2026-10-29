@@ -27,7 +27,10 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     coverage: {
       provider: 'v8',
-      include: ['src/meteor_station/{core,orbit,timetable,decoder,radio,server}/*.ts'],
+      include: [
+        'src/meteor_station/{core,orbit,timetable,decoder,radio,server}/*.ts',
+        'src/meteor_station/map/layout.ts',
+      ],
       exclude: [
         '**/decoder.worker.ts',
         '**/wasm.ts',
