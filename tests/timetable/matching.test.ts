@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
+  anyTimeWindow,
   bellTimestamp,
   overlapWindow,
   matchPasses,
@@ -98,5 +99,55 @@ describe('School availability', () => {
       expect(window.packedBy).toBeGreaterThan(window.receiveUntil);
       expect(window.maxElevation).toBeLessThanOrEqual(window.pass.maxElevation + 0.01);
     }
+  });
+  test('any-time mode keeps the whole pass with setup and pack-away buffers', () => {
+    // Arrange: a pass outside every bell period.
+    const night = {
+      ...pass,
+      start: time('22:10'),
+      peak: time('22:16'),
+      end: time('22:22'),
+    };
+    // Act
+    const window = anyTimeWindow(night, DEFAULT_MATCH)!;
+    const started = anyTimeWindow(night, {
+      ...DEFAULT_MATCH,
+      notBefore: time('22:12'),
+    })!;
+    // Assert
+    expect(window.kind).toBe('outside');
+    expect(window.setupAt).toBe(time('22:05'));
+    expect(window.receiveFrom).toBe(night.start);
+    expect(window.receiveUntil).toBe(night.end);
+    expect(window.packedBy).toBe(time('22:25'));
+    expect(window.completePass).toBe(true);
+    expect(started.receiveFrom).toBe(time('22:17'));
+  });
+  test('any-time mode includes nights and weekends but honours excluded dates', () => {
+    // Arrange
+    const orbits = snapshotOrbits(parseSnapshot(data));
+    const passes = orbits.flatMap((orbit) =>
+      predictPasses(
+        orbit,
+        SUNRISE,
+        Date.parse('2026-10-29T00:00:00Z'),
+        Date.parse('2026-11-05T00:00:00Z'),
+      ),
+    );
+    const schoolOnly = matchPasses(passes, orbits, SUNRISE, DEFAULT_MATCH);
+    // Act
+    const result = matchPasses(passes, orbits, SUNRISE, {
+      ...DEFAULT_MATCH,
+      anyTime: true,
+      excludedDates: ['2026-11-02'],
+    });
+    // Assert
+    const days = result.map((window) => schoolDate(window.receiveFrom));
+    expect(result.length).toBeGreaterThan(schoolOnly.length);
+    expect(days).toContain('2026-10-31');
+    expect(days).not.toContain('2026-11-02');
+    expect(result.every((window) => window.kind === 'outside')).toBe(true);
+    for (let i = 1; i < result.length; i++)
+      expect(result[i]!.receiveFrom).toBeGreaterThanOrEqual(result[i - 1]!.receiveFrom);
   });
 });

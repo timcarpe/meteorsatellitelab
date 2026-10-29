@@ -33,6 +33,9 @@ const satIcon =
   '<svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="m7 6 5 5-6 6-5-5zm18 9 6 6-6 6-6-6zM14 9l9 9-8 8-9-9z" stroke="currentColor" stroke-width="1.6"/><path d="m20 5 7 7m-8-4 5 5M9 24l-5 5" stroke="currentColor" stroke-width="1.6"/></svg>';
 const refreshIcon =
   '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+/** Rolling prediction horizon and the number of windows listed before "Show all". */
+const PLAN_DAYS = 7;
+const LIST_LIMIT = 12;
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
   <header class="site-header">
@@ -69,7 +72,7 @@ app.innerHTML = `
         <article class="window-card" id="recommended" aria-label="Selected pass"></article>
       </div>
       <section class="week-section" aria-labelledby="week-title">
-        <div class="section-heading"><div><h2 id="week-title">Passes this week</h2><p id="availability-summary"></p></div><button id="timetable-open" class="button outlined">Availability</button></div>
+        <div class="section-heading"><div><h2 id="week-title">Upcoming passes</h2><p id="availability-summary"></p></div><button id="timetable-open" class="button outlined">Availability</button></div>
         <div id="pass-list" class="pass-list"></div>
       </section>
     </section>
@@ -124,9 +127,9 @@ app.innerHTML = `
   <dialog id="timetable-dialog" aria-labelledby="availability-title">
     <div class="dialog-header"><h2 id="availability-title">When can you go outside?</h2><form method="dialog"><button class="dialog-close" aria-label="Close without saving">×</button></form></div>
     <div class="dialog-body">
-      <section aria-labelledby="periods-title"><h3 id="periods-title">School day</h3><p>Breaks are always included. Tick a lesson only if you are free then or have your teacher’s permission.</p><div id="lesson-options" class="day-list"></div></section>
+      <section aria-labelledby="periods-title"><h3 id="periods-title">School day</h3><p>Breaks are always included. Tick a lesson only if you are free then or have your teacher’s permission.</p><div id="lesson-options" class="day-list"></div><label class="switch-row"><span><strong>Any time (testing)</strong><span>Ignore bell times and weekends and list every pass, day or night. Days off still apply.</span></span><input id="any-time" type="checkbox" role="switch" class="switch" /></label></section>
       <section aria-labelledby="days-title"><h3 id="days-title">Days you cannot attend</h3><p>Holidays, trips or other days off.</p><div class="date-entry"><label class="field-label">Date<input id="excluded-date" type="date" /></label><button id="add-excluded-date" class="button outlined">Add day</button></div><p id="availability-error" role="alert" hidden></p><div id="excluded-date-list" class="date-list" aria-live="polite"></div></section>
-      <details class="timetable-reference"><summary>How windows are matched</summary><p>Regular Monday–Friday Secondary bell times. Breaks come first, with 5 minutes to set up and 3 minutes to pack away.</p><a href="${TIMETABLE_SOURCE}" target="_blank" rel="noreferrer">View the Secondary bell times</a></details>
+      <details class="timetable-reference"><summary>How windows are matched</summary><p>Passes are predicted for a rolling ${PLAN_DAYS} days from now and recalculated every minute, so new days appear as time passes. Windows use the regular Monday–Friday Secondary bell times; breaks come first, with 5 minutes to set up and 3 minutes to pack away. The planner lists ${LIST_LIMIT} windows at a time.</p><a href="${TIMETABLE_SOURCE}" target="_blank" rel="noreferrer">View the Secondary bell times</a></details>
     </div>
     <div class="dialog-actions"><span>Saved on this device</span><button id="cancel-timetable" class="button text">Cancel</button><button id="save-timetable" class="button primary">Save</button></div>
   </dialog>
@@ -153,6 +156,8 @@ let excludedDateDraft: string[] = [];
 let sessionStarted: number | null = null;
 let sampleCount = 0;
 let excludedDates: string[] = [];
+let anyTime = false;
+let showAllWindows = false;
 let captureInfo: ReceiverInfo | null = null;
 let capturedFrames = new ArrayBuffer(0);
 let capturePlan: ReceptionWindow | null = null;
@@ -166,6 +171,7 @@ try {
     lessons = saved.lessons.filter((id: unknown) =>
       BELL_PERIODS.some((period) => period.id === id && period.kind === 'lesson'),
     );
+  anyTime = saved.anyTime === true;
   if (Array.isArray(saved.excludedDates))
     excludedDates = saved.excludedDates.filter((day: unknown) => {
       try {
@@ -261,7 +267,7 @@ function selectWindow(window: ReceptionWindow, preview = true): void {
     : null;
   const direction = `${compass(window.pass.startAzimuth)} → ${compass(window.pass.endAzimuth)}`;
   element('recommended').innerHTML =
-    `<div class="recommend-top"><h2>Selected pass</h2><span class="chip ${window.kind}">${window.kind === 'break' ? 'Break' : 'Free period'}</span></div>
+    `<div class="recommend-top"><h2>Selected pass</h2><span class="chip ${window.kind}">${window.kind === 'break' ? 'Break' : window.kind === 'lesson' ? 'Free period' : 'Any time'}</span></div>
     <p class="window-date">${dayText(window.receiveFrom)} · ${window.label}</p>
     <p class="window-time">${timeText(window.receiveFrom)}–${timeText(window.receiveUntil)}</p>
     <dl class="pass-facts"><div><dt>Satellite</dt><dd>${window.pass.name.replace('Meteor ', '')}</dd></div><div><dt>Height</dt><dd>${Math.round(window.maxElevation)}°</dd></div><div><dt>Usable</dt><dd>${Math.floor(window.usableMinutes)} min</dd></div><div><dt>Path</dt><dd>${direction}</dd></div></dl>
@@ -296,28 +302,37 @@ function rebuildPlan(): void {
     age > 14 || age < -1
       ? 'These orbital elements are too old or dated in the future. Refresh orbit data before planning a session.'
       : 'Orbit data is more than seven days old. Refresh before relying on these pass times.';
-  const passes =
-    age <= 14 && age >= -1
-      ? orbits.flatMap((orbit) =>
-          predictPasses(orbit, SUNRISE, now, now + 7 * 86400000),
-        )
-      : [];
+  const predicting = age <= 14 && age >= -1;
+  const horizon = now + PLAN_DAYS * 86400000;
+  const passes = predicting
+    ? orbits.flatMap((orbit) => predictPasses(orbit, SUNRISE, now, horizon))
+    : [];
   windows = matchPasses(passes, orbits, SUNRISE, {
     ...DEFAULT_MATCH,
     allowedLessons: lessons,
     excludedDates,
     notBefore: now,
+    anyTime,
   });
+  const listed = showAllWindows ? windows : windows.slice(0, LIST_LIMIT);
+  const listFooter =
+    windows.length > LIST_LIMIT
+      ? `<div class="pass-footer"><span>Showing ${listed.length} of ${windows.length} windows</span><button class="button text" id="toggle-all-passes">${showAllWindows ? 'Show fewer' : 'Show all'}</button></div>`
+      : '';
   element('pass-list').innerHTML = windows.length
     ? `<div class="pass-head"><span>Day</span><span>Reception</span><span>School window</span><span>Satellite</span><span>Height</span><span></span></div>` +
-      windows
-        .slice(0, 12)
+      listed
         .map(
           (window, index) =>
             `<button class="pass-row" data-pass="${window.pass.id}" data-index="${index}" aria-label="Choose ${window.pass.name}, ${dayText(window.receiveFrom)}, ${timeText(window.receiveFrom)}"><span>${dayText(window.receiveFrom)}</span><strong>${timeText(window.receiveFrom)} – ${timeText(window.receiveUntil)}</strong><span><i class="window-dot ${window.kind}"></i>${window.label}</span><span>${window.pass.name}</span><span class="height-label">${Math.round(window.maxElevation)}°</span><span class="row-arrow" aria-hidden="true">›</span></button>`,
         )
-        .join('')
-    : '<div class="no-passes"><p>No passes match your availability in the next seven days.</p></div>';
+        .join('') +
+      listFooter
+    : `<div class="no-passes"><p>${predicting ? `No passes match your availability between now and ${dayText(horizon)}.` : 'Predictions are paused until orbit data is refreshed.'}</p></div>`;
+  document.getElementById('toggle-all-passes')?.addEventListener('click', () => {
+    showAllWindows = !showAllWindows;
+    rebuildPlan();
+  });
   document
     .querySelectorAll<HTMLButtonElement>('[data-index]')
     .forEach(
@@ -332,7 +347,7 @@ function rebuildPlan(): void {
     selected = null;
     previewAt = null;
     element('recommended').innerHTML =
-      '<h2>No matching pass</h2><p class="window-empty">No school window matches a pass this week. Add a free period in Availability or refresh orbit data.</p><button class="button outlined" id="empty-radio">Open receiver</button>';
+      `<h2>No matching pass</h2><p class="window-empty">No school window matches a pass in the next ${PLAN_DAYS} days. Add a free period in Availability or refresh orbit data.</p><button class="button outlined" id="empty-radio">Open receiver</button>`;
     element('empty-radio').onclick = () => showPage('receive');
     updateMap();
   }
@@ -342,7 +357,11 @@ function rebuildPlan(): void {
   const daysOff = excludedDates.length
     ? ` · ${excludedDates.length} day${excludedDates.length === 1 ? '' : 's'} off`
     : '';
-  element('availability-summary').textContent = `Breaks${freePeriods}${daysOff}`;
+  const scope = anyTime ? 'Any time (testing)' : `Breaks${freePeriods}`;
+  // Make the rolling horizon explicit: it moves forward every time the plan rebuilds.
+  element('availability-summary').textContent = predicting
+    ? `Next ${PLAN_DAYS} days, rolling to ${dayText(horizon)} · ${scope}${daysOff}`
+    : `Predictions paused · ${scope}${daysOff}`;
   element('orbit-source').textContent =
     `CelesTrak elements: ${orbits.map((orbit) => `${orbit.name} ${dayText(orbit.epoch)}`).join(' · ')}. Campus position: 10.7385° N, 106.6975° E.`;
 }
@@ -737,11 +756,23 @@ element('timetable-open').onclick = () => {
       ? `<div class="day-row included"><span class="day-time">${period.from}–${period.until}</span><span class="day-label">${period.label}</span><span class="day-state">Included</span></div>`
       : `<label class="day-row"><span class="day-time">${period.from}–${period.until}</span><span class="day-label">${period.label}</span><input type="checkbox" value="${period.id}" ${lessons.includes(period.id) ? 'checked' : ''} /></label>`,
   ).join('');
+  element<HTMLInputElement>('any-time').checked = anyTime;
+  syncAnyTime();
   excludedDateDraft = [...excludedDates];
   element<HTMLInputElement>('excluded-date').value = '';
   renderExcludedDates();
   element<HTMLDialogElement>('timetable-dialog').showModal();
 };
+/** Any-time mode greys out the bell periods; lesson choices are kept for later. */
+function syncAnyTime(): void {
+  const on = element<HTMLInputElement>('any-time').checked;
+  element('lesson-options').classList.toggle('disabled', on);
+  element('lesson-options').setAttribute('aria-disabled', String(on));
+  document
+    .querySelectorAll<HTMLInputElement>('#lesson-options input')
+    .forEach((input) => (input.disabled = on));
+}
+element('any-time').onchange = syncAnyTime;
 element('cancel-timetable').onclick = () =>
   element<HTMLDialogElement>('timetable-dialog').close();
 element('save-timetable').onclick = () => {
@@ -750,10 +781,11 @@ element('save-timetable').onclick = () => {
     ...document.querySelectorAll<HTMLInputElement>('#lesson-options input:checked'),
   ].map((input) => input.value);
   excludedDates = [...excludedDateDraft];
+  anyTime = element<HTMLInputElement>('any-time').checked;
   try {
     localStorage.setItem(
       'meteor.availability.v1',
-      JSON.stringify({ lessons, excludedDates }),
+      JSON.stringify({ lessons, excludedDates, anyTime }),
     );
   } catch {
     toast('Settings will last for this visit; this browser cannot save them.');

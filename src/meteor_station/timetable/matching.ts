@@ -37,6 +37,8 @@ export interface MatchOptions {
   readonly allowedLessons: readonly string[];
   readonly excludedDates: readonly string[];
   readonly notBefore?: number;
+  /** Testing mode: ignore bell times and weekends; excluded dates still apply. */
+  readonly anyTime?: boolean;
 }
 export const DEFAULT_MATCH: MatchOptions = Object.freeze({
   setupMinutes: 5,
@@ -58,11 +60,33 @@ export function overlapWindow(
   day: string,
   options: MatchOptions,
 ): ReceptionWindow | null {
+  return windowBetween(
+    pass,
+    bellTimestamp(day, period.from),
+    bellTimestamp(day, period.until),
+    period.label,
+    period.kind,
+    options,
+  );
+}
+/** The whole pass, still reserving setup time before it and pack-away time after. */
+export function anyTimeWindow(
+  pass: Pass,
+  options: MatchOptions,
+): ReceptionWindow | null {
+  return windowBetween(pass, -Infinity, Infinity, 'Any time', 'outside', options);
+}
+function windowBetween(
+  pass: Pass,
+  from: number,
+  until: number,
+  label: string,
+  kind: ReceptionWindow['kind'],
+  options: MatchOptions,
+): ReceptionWindow | null {
   requireFinite(options.setupMinutes, 'Setup minutes', 0, 30);
   requireFinite(options.packMinutes, 'Pack-away minutes', 0, 30);
   requireFinite(options.minimumMinutes, 'Minimum reception', 1, 20);
-  const from = bellTimestamp(day, period.from);
-  const until = bellTimestamp(day, period.until);
   const receiveFrom = Math.max(
     pass.start,
     Math.max(from, options.notBefore ?? from) + options.setupMinutes * 60000,
@@ -72,8 +96,8 @@ export function overlapWindow(
   if (usableMinutes < options.minimumMinutes) return null;
   return Object.freeze({
     pass,
-    label: period.label,
-    kind: period.kind,
+    label,
+    kind,
     setupAt: receiveFrom - options.setupMinutes * 60000,
     receiveFrom,
     receiveUntil,
@@ -98,11 +122,15 @@ export function matchPasses(
   for (const pass of passes) {
     const day = schoolDate(pass.start);
     const weekday = new Date(`${day}T12:00:00+07:00`).getUTCDay();
-    if (weekday === 0 || weekday === 6 || options.excludedDates.includes(day)) continue;
-    for (const period of BELL_PERIODS) {
-      if (period.kind === 'lesson' && !options.allowedLessons.includes(period.id))
-        continue;
-      const window = overlapWindow(pass, period, day, options);
+    if (options.excludedDates.includes(day)) continue;
+    if (!options.anyTime && (weekday === 0 || weekday === 6)) continue;
+    const candidates = options.anyTime
+      ? [anyTimeWindow(pass, options)]
+      : BELL_PERIODS.filter(
+          (period) =>
+            period.kind === 'break' || options.allowedLessons.includes(period.id),
+        ).map((period) => overlapWindow(pass, period, day, options));
+    for (const window of candidates) {
       if (!window) continue;
       const orbit = orbits.find((item) => item.norad === pass.norad)!;
       const peak = peakBetween(
@@ -114,6 +142,7 @@ export function matchPasses(
       windows.push(Object.freeze({ ...window, maxElevation: peak.elevation }));
     }
   }
+  if (options.anyTime) return windows.sort((a, b) => a.receiveFrom - b.receiveFrom);
   return windows.sort((a, b) => {
     const dateOrder = schoolDate(a.receiveFrom).localeCompare(
       schoolDate(b.receiveFrom),

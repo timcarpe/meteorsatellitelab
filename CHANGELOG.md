@@ -17,6 +17,11 @@ All notable changes follow Keep a Changelog.
 - Receiver dashboard with Satellite/Radio modes, measured IQ spectrum and waterfall,
   audio waveform, tuned frequency, sample counts and elapsed time.
 - Readable availability cards and a date picker with removable excluded days.
+- “Any time (testing)” switch in Availability: greys out bell periods and lists
+  every pass, day or night and at weekends, keeping setup/pack-away buffers and
+  excluded days. Saved with the other availability settings.
+- The planner states its rolling seven-day horizon and end date, and long lists
+  show “Showing 12 of N windows” with Show all / Show fewer.
 
 ### Changed
 - Simplified the interface with compact Material-style controls and concise copy.

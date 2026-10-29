@@ -613,6 +613,10 @@ main {
   font-size: 13px;
   font-weight: 600;
 }
+.chip.outside {
+  background: var(--surface-dim);
+  color: var(--ink);
+}
 .chip.lesson {
   background: var(--lesson-container);
   color: #6b3a00;
@@ -760,6 +764,19 @@ main {
 }
 .window-dot.lesson {
   background: var(--lesson);
+}
+.window-dot.outside {
+  background: var(--outline);
+}
+.pass-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px 6px 20px;
+  border-top: 1px solid var(--line);
+  font-size: 14px;
+  color: var(--muted);
 }
 .no-passes {
   padding: 24px;
@@ -1292,6 +1309,68 @@ label.day-row:has(:focus-visible) {
   accent-color: var(--primary);
 }
 .day-row input:focus-visible {
+  outline: none;
+}
+.day-list.disabled {
+  opacity: 0.45;
+}
+.day-list.disabled label.day-row {
+  cursor: default;
+}
+.day-list.disabled label.day-row:hover {
+  background: transparent;
+}
+.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  cursor: pointer;
+}
+.switch-row > span > span {
+  display: block;
+  margin-top: 2px;
+  font-size: 14px;
+  color: var(--muted);
+}
+.switch-row:has(:focus-visible) {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 44px;
+  height: 24px;
+  margin: 0;
+  border-radius: 12px;
+  background: var(--outline);
+  appearance: none;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+.switch::before {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+}
+.switch:checked {
+  background: var(--primary);
+}
+.switch:checked::before {
+  transform: translateX(20px);
+}
+.switch:focus-visible {
   outline: none;
 }
 .day-row.included {
