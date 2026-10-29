@@ -1,0 +1,27 @@
+{
+  "recordedAt": "2026-10-29T03:14:32.554Z",
+  "url": "https://meteor-station-sunrise.vercel.app",
+  "checks": {
+    "recordedCaduReplay": {
+      "frames": 768,
+      "segments": 2981,
+      "imageWidth": 1568,
+      "imageHeight": 584
+    },
+    "generatedIq": {
+      "frames": 159,
+      "segments": 604,
+      "imageHeight": 128,
+      "payloadMismatches": 0,
+      "exportMatchesNodeByteForByte": true
+    },
+    "channelSelectionAfterStop": "passed",
+    "pngCaduMetadataDownload": "passed",
+    "publicOrbitApi": "HTTP 200, two Meteor OMM records, upstream refreshed, public CORS",
+    "standaloneAssetPackaging": "No external JS, WASM, map, font, or recording assets",
+    "directFileUrl": "Not tested: browser automation blocks file: navigation",
+    "physicalV3": "Not tested: dongle not connected",
+    "liveFm": "Pending physical V3",
+    "onAirMeteor": "Pending physical pass"
+  }
+}

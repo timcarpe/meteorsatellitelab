@@ -1,0 +1,16 @@
+node_modules/
+dist/
+build/
+.cache/
+.tools/
+.vercel/
+.env
+.env.*
+.venv/
+__pycache__/
+.mypy_cache/
+coverage/
+.DS_Store
+.vercel
+.env*
+artifacts/

@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "fetchedAt": "2026-10-29T01:51:39.382Z",
+  "source": "https://celestrak.org/NORAD/elements/gp.php?GROUP=weather&FORMAT=JSON",
+  "records": [
+    {
+      "OBJECT_NAME": "METEOR-M2 3",
+      "OBJECT_ID": "2023-091A",
+      "EPOCH": "2026-10-28T14:18:48.484800",
+      "MEAN_MOTION": 14.24055162,
+      "ECCENTRICITY": 0.00047742,
+      "INCLINATION": 98.5923,
+      "RA_OF_ASC_NODE": 353.7327,
+      "ARG_OF_PERICENTER": 132.485,
+      "MEAN_ANOMALY": 227.6734,
+      "EPHEMERIS_TYPE": 0,
+      "CLASSIFICATION_TYPE": "U",
+      "NORAD_CAT_ID": 57166,
+      "ELEMENT_SET_NO": 999,
+      "REV_AT_EPOCH": 17350,
+      "BSTAR": 0.000016048876,
+      "MEAN_MOTION_DOT": -6e-8,
+      "MEAN_MOTION_DDOT": 0
+    },
+    {
+      "OBJECT_NAME": "METEOR-M2 4",
+      "OBJECT_ID": "2024-039A",
+      "EPOCH": "2026-10-28T14:55:07.611168",
+      "MEAN_MOTION": 14.22441373,
+      "ECCENTRICITY": 0.00076781,
+      "INCLINATION": 98.7213,
+      "RA_OF_ASC_NODE": 259.3532,
+      "ARG_OF_PERICENTER": 137.0518,
+      "MEAN_ANOMALY": 223.126,
+      "EPHEMERIS_TYPE": 0,
+      "CLASSIFICATION_TYPE": "U",
+      "NORAD_CAT_ID": 59051,
+      "ELEMENT_SET_NO": 999,
+      "REV_AT_EPOCH": 13823,
+      "BSTAR": 0.000015348694,
+      "MEAN_MOTION_DOT": -1e-7,
+      "MEAN_MOTION_DDOT": 0
+    }
+  ]
+}

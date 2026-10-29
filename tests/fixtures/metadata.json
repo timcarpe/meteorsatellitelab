@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "source": "https://raw.githubusercontent.com/jekhokie/raspberry-noaa-v2/master/scripts/tools/verification_tool/test_files/meteordemod-input.cadu",
+  "sourceSha256": "adb6c8a9516e57aaaddc63282576ff4765657369f65b2cd6c191abb67dbecaee",
+  "firstFrame": 2,
+  "frameCount": 768,
+  "bytes": 786432,
+  "sha256": "7d02a37dab9f420db2b553d7452910e4977962c15fef68c3c7b6136cfd11df02",
+  "license": "GPL-3.0",
+  "observationTime": null,
+  "receptionSite": null,
+  "description": "Recorded corrected CADU frames; not IQ and not a live reception."
+}

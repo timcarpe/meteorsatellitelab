@@ -1,0 +1,23 @@
+{
+  "generatedAt": "2026-10-29T02:25:57.107Z",
+  "sampleRate": 288000,
+  "description": "Generated noisy OQPSK IQ carrying independent recorded Meteor frames; not on-air IQ.",
+  "reports": [
+    {
+      "input": "soft",
+      "bytes": 2621456,
+      "decoded": 159,
+      "mismatch": 0,
+      "milliseconds": 635.535792,
+      "sourceSha256": "bd92167776ad9cb264f9f09ce069b3c2948520964b95ed42bf22b53538c0015e"
+    },
+    {
+      "input": "cu8",
+      "bytes": 10485952,
+      "decoded": 155,
+      "mismatch": 0,
+      "milliseconds": 2817.033625,
+      "sourceSha256": "72894d0f7de261744e399483f2a2d3b1a0569a97e539ff107da1b2867b8b4230"
+    }
+  ]
+}

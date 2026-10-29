@@ -1,0 +1,8 @@
+{
+  "decoder": "SatDump 1.2.2 native",
+  "input": "Generated 288 kS/s OQPSK, +2500 Hz offset and +20 Hz/s chirp",
+  "frames": 68,
+  "payloadMismatches": 0,
+  "imageGoldenSamples": 2784,
+  "scope": "Independent validation reference, not on-air IQ"
+}

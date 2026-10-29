@@ -1,0 +1,18 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "pnpm build",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "regions": ["sin1"],
+  "functions": {"api/orbits.ts": {"maxDuration": 15}},
+  "headers": [
+    {"source": "/(.*)", "headers": [
+      {"key": "X-Content-Type-Options", "value": "nosniff"},
+      {"key": "Referrer-Policy", "value": "no-referrer"},
+      {"key": "Permissions-Policy", "value": "usb=(self), microphone=(), camera=(), geolocation=(self)"}
+    ]},
+    {"source": "/meteor-station.html", "headers": [
+      {"key": "Content-Disposition", "value": "attachment; filename=meteor-station.html"}
+    ]}
+  ]
+}

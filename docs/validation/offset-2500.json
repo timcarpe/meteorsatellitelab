@@ -1,0 +1,43 @@
+{
+  "generatedAt": "2026-10-29T02:56:08.632Z",
+  "sampleRate": 288000,
+  "description": "Generated noisy OQPSK IQ carrying independent recorded Meteor frames; not on-air IQ.",
+  "reports": [
+    {
+      "input": "soft",
+      "bytes": 2621456,
+      "decoded": 159,
+      "mismatch": 0,
+      "milliseconds": 686.031084,
+      "sourceSha256": "bd92167776ad9cb264f9f09ce069b3c2948520964b95ed42bf22b53538c0015e",
+      "decodedSha256": "31e4bf691612e295770bd2623f1d17b22fc570addefa91506499994f7c8aac50"
+    },
+    {
+      "input": "cu8",
+      "bytes": 10485952,
+      "decoded": 159,
+      "mismatch": 0,
+      "milliseconds": 2907.5348750000003,
+      "sourceSha256": "134d62bcf18350df238a551a16ea6da6b62bdb362ede3b6e995590e5ed952fde",
+      "decodedSha256": "31e4bf691612e295770bd2623f1d17b22fc570addefa91506499994f7c8aac50"
+    },
+    {
+      "input": "cu8-irregular",
+      "bytes": 10485952,
+      "decoded": 159,
+      "mismatch": 0,
+      "milliseconds": 2789.4285,
+      "sourceSha256": "134d62bcf18350df238a551a16ea6da6b62bdb362ede3b6e995590e5ed952fde",
+      "decodedSha256": "31e4bf691612e295770bd2623f1d17b22fc570addefa91506499994f7c8aac50"
+    },
+    {
+      "input": "noise",
+      "bytes": 576000,
+      "decoded": 0,
+      "mismatch": 0,
+      "milliseconds": 240.5729169999995,
+      "sourceSha256": "dce4143c0a895c623b0d6f2a98ae63e9c840069ab5eecff389080058b0ef3099",
+      "decodedSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

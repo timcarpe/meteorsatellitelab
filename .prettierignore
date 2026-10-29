@@ -1,0 +1,5 @@
+src/meteor_station/decoder/generated/
+src/meteor_station/decoder/native/vendor/
+build/
+dist/
+node_modules/
