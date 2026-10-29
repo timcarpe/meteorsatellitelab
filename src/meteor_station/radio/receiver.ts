@@ -18,6 +18,7 @@ export type ReceiverEvent =
   | WorkerResponse
   | { readonly type: 'status'; readonly message: string }
   | { readonly type: 'started'; readonly info: ReceiverInfo }
+  | { readonly type: 'tuned'; readonly info: ReceiverInfo }
   | { readonly type: 'stopped'; readonly frames: ArrayBuffer };
 
 export class Receiver {
@@ -247,13 +248,14 @@ export class Receiver {
           this.status(
             `Checking Meteor’s other channel: ${(frequency / 1e6).toFixed(3)} MHz…`,
           );
-          await device.setCenterFrequency(frequency);
+          const tuned = await device.setCenterFrequency(frequency);
           if (!this.active || generation !== this.generation) break;
           await this.openSession(mode, this.info!.sampleRate);
           if (!this.active || generation !== this.generation) break;
           await device.resetBuffer();
           if (!this.active || generation !== this.generation) break;
-          this.info = { ...this.info!, frequency };
+          this.info = { ...this.info!, frequency: tuned };
+          this.onEvent({ type: 'tuned', info: this.info });
           tunedAt = Date.now();
         }
       }

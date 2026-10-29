@@ -1,21 +1,40 @@
 /** Earth map and ground tracks generated from propagated positions, not illustrations. */
-import { geoNaturalEarth1, geoPath, geoGraticule10, geoCircle } from 'd3-geo';
+import {
+  geoNaturalEarth1,
+  geoMercator,
+  geoPath,
+  geoGraticule10,
+  geoCircle,
+} from 'd3-geo';
 import { feature } from 'topojson-client';
 import countries from 'world-atlas/countries-110m.json';
 import type { Topology, GeometryCollection } from 'topojson-specification';
-import type { Observer, Pass } from '@meteor/core/models';
+import { SUNRISE, type Observer, type Pass } from '@meteor/core/models';
 import { positionAt, type Orbit } from '@meteor/orbit/propagation';
 
 const NS = 'http://www.w3.org/2000/svg';
-const colors = ['#78e1d0', '#ffbe7d'];
-const mapProjection = geoNaturalEarth1().fitExtent(
-  [
-    [20, 14],
-    [940, 468],
-  ],
-  { type: 'Sphere' },
-);
-const path = geoPath(mapProjection);
+export type MapView = 'sunrise' | 'global';
+const colors = ['#72e0e4', '#c2b6ff'];
+const extent: [[number, number], [number, number]] = [
+  [20, 14],
+  [940, 388],
+];
+const projections = {
+  global: geoNaturalEarth1().fitExtent(extent, { type: 'Sphere' }),
+  sunrise: geoMercator()
+    .center([SUNRISE.longitude, SUNRISE.latitude])
+    .scale(1150)
+    .translate([480, 200])
+    .clipExtent(extent),
+};
+const regionLabels: readonly [string, number, number][] = [
+  ['Vietnam', 108.3, 16.8],
+  ['Thailand', 100.5, 16.2],
+  ['Cambodia', 104.6, 13.1],
+  ['Laos', 102.8, 19.8],
+  ['Malaysia', 102.0, 4.3],
+  ['Philippines', 122.3, 12.8],
+];
 
 function svgElement<K extends keyof SVGElementTagNameMap>(
   name: K,
@@ -26,45 +45,85 @@ function svgElement<K extends keyof SVGElementTagNameMap>(
   return element;
 }
 
+function withinMap(point: [number, number] | null): point is [number, number] {
+  return (
+    point !== null &&
+    point[0] >= extent[0][0] &&
+    point[0] <= extent[1][0] &&
+    point[1] >= extent[0][1] &&
+    point[1] <= extent[1][1]
+  );
+}
+
 export class EarthMap {
+  private view: MapView = 'sunrise';
+  private readonly base = svgElement('g', {});
   private readonly dynamic = svgElement('g', {});
   private readonly svg = svgElement('svg', {
-    viewBox: '0 0 960 480',
+    viewBox: '0 0 960 400',
     role: 'img',
     'aria-label':
       'Earth map showing Meteor satellite positions and predicted ground tracks',
   });
   public constructor(container: HTMLElement) {
+    this.svg.append(this.base, this.dynamic);
+    this.setView('sunrise');
+    container.replaceChildren(this.svg);
+  }
+
+  /** Change geographic framing without changing the selected pass or preview time. */
+  public setView(view: MapView): void {
+    this.view = view;
+    this.svg.setAttribute(
+      'aria-label',
+      view === 'sunrise'
+        ? 'Regional map centred on VAS Sunrise in Ho Chi Minh City with Meteor ground tracks'
+        : 'Global Earth map showing Meteor satellite positions and ground tracks',
+    );
+    const projection = projections[view];
+    const path = geoPath(projection);
     const topology = countries as unknown as Topology<{
       countries: GeometryCollection;
     }>;
-    this.svg.append(
+    const elements: SVGElement[] = [
       svgElement('path', {
         d: path({ type: 'Sphere' }) ?? '',
-        fill: '#163e46',
-        stroke: '#31545b',
+        fill: '#18343a',
+        stroke: '#49695f',
         'stroke-width': '1',
       }),
-    );
-    this.svg.append(
       svgElement('path', {
         d: path(geoGraticule10()) ?? '',
         fill: 'none',
-        stroke: '#31545b',
-        'stroke-width': '0.55',
-        opacity: '0.65',
+        stroke: '#2d4b45',
+        'stroke-width': '.7',
       }),
-    );
-    this.svg.append(
       svgElement('path', {
         d: path(feature(topology, topology.objects.countries)) ?? '',
-        fill: '#42676a',
-        stroke: '#244b52',
-        'stroke-width': '0.5',
+        fill: '#36594f',
+        stroke: '#59786a',
+        'stroke-width': '.8',
       }),
-    );
-    this.svg.append(this.dynamic);
-    container.replaceChildren(this.svg);
+    ];
+    if (view === 'sunrise') {
+      for (const [name, longitude, latitude] of regionLabels) {
+        const point = projection([longitude, latitude]);
+        if (!withinMap(point) || point[1] < extent[0][1] + 18) continue;
+        const label = svgElement('text', {
+          x: `${point[0]}`,
+          y: `${point[1]}`,
+          fill: '#d4e2d7',
+          'font-size': '20',
+          'text-anchor': 'middle',
+          stroke: '#36594f',
+          'stroke-width': '3',
+          'paint-order': 'stroke',
+        });
+        label.textContent = name;
+        elements.push(label);
+      }
+    }
+    this.base.replaceChildren(...elements);
   }
 
   public render(
@@ -73,6 +132,9 @@ export class EarthMap {
     at: number,
     pass?: Pass,
   ): void {
+    const mapProjection = projections[this.view];
+    const path = geoPath(mapProjection);
+    const school = mapProjection([observer.longitude, observer.latitude]);
     const elements: SVGElement[] = [];
     orbits.forEach((orbit, index) => {
       const color = colors[index % colors.length]!;
@@ -92,7 +154,7 @@ export class EarthMap {
             d: path({ type: 'LineString', coordinates }) ?? '',
             fill: 'none',
             stroke: color,
-            'stroke-width': '1.6',
+            'stroke-width': '2',
             opacity: pass && pass.norad !== orbit.norad ? '0.25' : '0.8',
             'stroke-dasharray': dashed ? '5 5' : 'none',
           }),
@@ -117,7 +179,7 @@ export class EarthMap {
         }),
       );
       const point = mapProjection([position.longitude, position.latitude]);
-      if (point) {
+      if (withinMap(point)) {
         elements.push(
           svgElement('circle', {
             cx: `${point[0]}`,
@@ -134,12 +196,21 @@ export class EarthMap {
             transform: `translate(${point[0]},${point[1]}) rotate(-25)`,
           }),
         );
+        const leftLabel =
+          school !== null &&
+          point[0] < school[0] &&
+          Math.abs(point[0] - school[0]) < 160 &&
+          Math.abs(point[1] - school[1]) < 60;
         const label = svgElement('text', {
-          x: `${Math.min(840, point[0] + 14)}`,
-          y: `${point[1] - 9}`,
+          x: `${leftLabel ? Math.max(150, point[0] - 16) : Math.min(800, point[0] + 16)}`,
+          y: `${Math.max(32, point[1] - 12)}`,
+          'text-anchor': leftLabel ? 'end' : 'start',
           fill: color,
-          'font-size': '12',
+          'font-size': '20',
           'font-weight': '600',
+          stroke: '#18343a',
+          'stroke-width': '3',
+          'paint-order': 'stroke',
         });
         label.textContent = orbit.name;
         elements.push(label);
@@ -157,30 +228,41 @@ export class EarthMap {
           svgElement('path', {
             d: path({ type: 'LineString', coordinates }) ?? '',
             fill: 'none',
-            stroke: '#fff5d9',
-            'stroke-width': '3',
+            stroke: '#e2dcff',
+            'stroke-width': '4',
           }),
         );
       }
     }
-    const school = mapProjection([observer.longitude, observer.latitude]);
-    if (school) {
+    if (withinMap(school)) {
       elements.push(
         svgElement('circle', {
           cx: `${school[0]}`,
           cy: `${school[1]}`,
-          r: '5',
-          fill: '#fff5d9',
-          stroke: '#173c43',
-          'stroke-width': '2',
+          r: '16',
+          fill: '#ffcf70',
+          'fill-opacity': '.12',
+        }),
+      );
+      elements.push(
+        svgElement('circle', {
+          cx: `${school[0]}`,
+          cy: `${school[1]}`,
+          r: '7',
+          fill: '#ffcf70',
+          stroke: '#18343a',
+          'stroke-width': '3',
         }),
       );
       const label = svgElement('text', {
-        x: `${school[0] + 10}`,
-        y: `${school[1] + 18}`,
-        fill: '#fff5d9',
-        'font-size': '12',
-        'font-weight': '600',
+        x: `${school[0] + 16}`,
+        y: `${school[1] + 23}`,
+        fill: '#ffda8a',
+        'font-size': '20',
+        'font-weight': '700',
+        stroke: '#18343a',
+        'stroke-width': '5',
+        'paint-order': 'stroke',
       });
       label.textContent = observer.name;
       elements.push(label);

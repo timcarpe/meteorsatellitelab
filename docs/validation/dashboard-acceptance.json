@@ -1,0 +1,38 @@
+{
+  "recordedAt": "2026-10-29T04:07:05.898221+00:00",
+  "url": "https://meteor-station-sunrise.vercel.app/",
+  "deploymentId": "dpl_DiTy6KG2AGFCCrmqRFivavhNLPng",
+  "checks": {
+    "liveMap": {
+      "beforeLocalTime": "11:02:30",
+      "afterLocalTime": "11:02:53",
+      "timezone": "Asia/Ho_Chi_Minh",
+      "bothSatelliteMarkerTransformsChanged": true,
+      "manualRefreshBetweenObservations": false
+    },
+    "refreshButton": "Returns from pass preview to live position and re-enables after fetching orbit data.",
+    "sunriseAndGlobal": "Both projections render; pass preview shows Meteor M2-4 at 61 degrees above Sunrise on 29 October 2026 at 14:50 local time.",
+    "availability": "Empty date is rejected. Excluding 29 October removes that day from results. Period 8 selection persists when reopened. Removing the exclusion restores available passes. Test changes restored.",
+    "radioMode": "96.500 MHz, optional check, audio waveform, volume and satellite mode switch render correctly.",
+    "recordedCadu": {
+      "frames": 768,
+      "segments": 2981,
+      "imageRows": 584,
+      "spectrum": "Empty: no IQ samples in CADU frames.",
+      "frequency": "Unknown"
+    },
+    "generatedIq": {
+      "frames": 159,
+      "segments": 604,
+      "imageRows": 128,
+      "samplesMillionsDisplayed": 5.24,
+      "frameGaps": 0,
+      "spectrum": "Measured spectrum and waterfall visible; frequency axis uses relative kHz because source center frequency is unknown.",
+      "consoleErrors": []
+    }
+  },
+  "limitations": [
+    "Physical RTL-SDR Blog V3 and live FM were not tested: hardware is not connected.",
+    "On-air Meteor reception still requires a physical satellite pass."
+  ]
+}

@@ -28,7 +28,12 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/meteor_station/{core,orbit,timetable,decoder,radio,server}/*.ts'],
-      exclude: ['**/decoder.worker.ts', '**/wasm.ts', '**/worker-session.ts'],
+      exclude: [
+        '**/decoder.worker.ts',
+        '**/wasm.ts',
+        '**/worker-session.ts',
+        '**/radio/*-view.ts',
+      ],
       thresholds: { statements: 80, branches: 75, functions: 80, lines: 80 },
       reporter: ['text', 'json-summary'],
     },

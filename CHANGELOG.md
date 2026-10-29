@@ -14,6 +14,17 @@ All notable changes follow Keep a Changelog.
 - Standalone HTML with embedded decoder/assets and a cached Vercel orbit endpoint.
 - Regression tests, independent SatDump image references, and waveform validation.
 
+- Receiver dashboard with Satellite/Radio modes, measured IQ spectrum and waterfall,
+  audio waveform, tuned frequency, sample counts and elapsed time.
+- Readable availability cards and a date picker with removable excluded days.
+
+### Changed
+- Simplified the interface with compact Material-style controls and concise copy.
+- Added a default Sunrise regional map and a Global toggle, preserving pass previews.
+- Live/preview tracking controls, visible refresh and a position timestamp.
+- Warm neutral and deep teal palette with stronger text and map contrast.
+- Moved reference times and orbit details into optional disclosures.
+
 ### Fixed
 - Viterbi convergence and NRZ-M boundary state using real pre-roll samples.
 - Reed–Solomon corrected parity output; incomplete final-buffer flushing.

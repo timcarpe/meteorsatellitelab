@@ -21,6 +21,7 @@ export type WorkerResponse =
       readonly processingMs: number;
     }
   | { readonly type: 'audio'; readonly data: Float32Array }
+  | { readonly type: 'spectrum'; readonly data: Float32Array }
   | { readonly type: 'image'; readonly image: ImageSnapshot }
   | { readonly type: 'done'; readonly frames: ArrayBuffer }
   | { readonly type: 'error'; readonly message: string };

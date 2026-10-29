@@ -1,32 +1,32 @@
 {
-  "recordedAt": "2026-10-29T03:18:14.539Z",
-  "testFiles": 7,
-  "tests": 22,
-  "scope": "core, decoder image/packet processing, orbit, timetable, FM, receiver lifecycle, orbit server. Excludes UI, WASM internals and worker transport (browser-tested).",
+  "recordedAt": "2026-10-29T04:07:05.896922+00:00",
+  "testFiles": 8,
+  "tests": 27,
+  "scope": "Core, decoder image/packet processing, orbit, timetable, FM, FFT spectrum, receiver lifecycle and orbit server. Excludes UI/canvas presentation, WASM internals and worker transport (browser-tested).",
   "totals": {
     "lines": {
-      "total": 552,
-      "covered": 481,
+      "total": 592,
+      "covered": 541,
       "skipped": 0,
-      "pct": 87.13
+      "pct": 91.38
     },
     "statements": {
-      "total": 613,
-      "covered": 523,
+      "total": 663,
+      "covered": 593,
       "skipped": 0,
-      "pct": 85.31
+      "pct": 89.44
     },
     "functions": {
-      "total": 65,
-      "covered": 56,
+      "total": 69,
+      "covered": 61,
       "skipped": 0,
-      "pct": 86.15
+      "pct": 88.4
     },
     "branches": {
-      "total": 384,
-      "covered": 297,
+      "total": 392,
+      "covered": 326,
       "skipped": 0,
-      "pct": 77.34
+      "pct": 83.16
     },
     "branchesTrue": {
       "total": 0,

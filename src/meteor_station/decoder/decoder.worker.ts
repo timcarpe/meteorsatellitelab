@@ -3,6 +3,7 @@ import { PacketAssembler } from '@meteor/decoder/packets';
 import { MeteorImage } from '@meteor/decoder/image';
 import { WasmDecoder } from '@meteor/decoder/wasm';
 import { FmCheck, measureIq } from '@meteor/radio/fm';
+import { iqSpectrum, SPECTRUM_BINS } from '@meteor/radio/spectrum';
 import { errorMessage, StationError } from '@meteor/core/errors';
 import type { Mode, WorkerRequest, WorkerResponse } from '@meteor/decoder/protocol';
 
@@ -18,6 +19,7 @@ const packets = new PacketAssembler();
 const image = new MeteorImage();
 const archive: Uint8Array[] = [];
 let lastImage = 0;
+let lastSpectrum = -Infinity;
 let selectedChannel: number | undefined;
 let serial: Promise<void> = Promise.resolve();
 
@@ -71,6 +73,15 @@ async function handle(message: WorkerRequest): Promise<void> {
   const bytes = new Uint8Array(message.data);
   if (bytes.length > 262144 || bytes.length === 0)
     throw new StationError('Invalid sample block size.');
+  if (
+    mode !== 'replay' &&
+    bytes.length >= SPECTRUM_BINS * 2 &&
+    performance.now() - lastSpectrum >= 100
+  ) {
+    const spectrum = iqSpectrum(bytes);
+    port.postMessage({ type: 'spectrum', data: spectrum }, [spectrum.buffer]);
+    lastSpectrum = performance.now();
+  }
   if (mode === 'fm') {
     const audio = fm!.push(bytes);
     port.postMessage({ type: 'audio', data: audio }, [audio.buffer]);

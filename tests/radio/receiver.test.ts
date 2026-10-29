@@ -137,4 +137,35 @@ describe('Receiver lifecycle', () => {
     await expect(receiver.replay(new Uint8Array(0))).rejects.toThrow('nonempty');
     await expect(receiver.replay(new Uint8Array(13), 'iq-file')).rejects.toThrow('I/Q');
   });
+  test('reports the actual tuning result when Meteor changes channel', async () => {
+    // Arrange
+    vi.useFakeTimers();
+    let deliver!: (block: { data: ArrayBuffer }) => void;
+    fake.device.readSamples.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          deliver = resolve;
+        }),
+    );
+    fake.device.setCenterFrequency.mockImplementation(
+      async (frequency: number) => frequency + 25,
+    );
+    const events: ReceiverEvent[] = [];
+    const receiver = new Receiver((event) => events.push(event));
+    // Act
+    await receiver.startRadio('meteor');
+    await vi.advanceTimersByTimeAsync(45001);
+    deliver({ data: new ArrayBuffer(65536) });
+    await vi.waitFor(() =>
+      expect(events.some((event) => event.type === 'tuned')).toBe(true),
+    );
+    await receiver.stop();
+    // Assert
+    expect(fake.device.setCenterFrequency).toHaveBeenLastCalledWith(137100000);
+    expect(receiver.info?.frequency).toBe(137100025);
+    expect(events.find((event) => event.type === 'tuned')).toMatchObject({
+      type: 'tuned',
+      info: { frequency: 137100025, mode: 'meteor' },
+    });
+  });
 });

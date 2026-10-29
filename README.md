@@ -12,10 +12,11 @@ audio server, radio proxy, or local decoder installation is required.
    without WebUSB. School time is always Asia/Ho_Chi_Minh (UTC+7).
 2. Choose a school window. Breaks are preferred; each window reserves five minutes
    for setup and three for packing. Add approved free periods and exclude holidays
-   in **Adjust availability**. Settings stay on the device.
-3. Attach the antenna and V3. **Check 96.5 FM** opens the browser's receiver chooser
-   and plays mono audio for up to 60 seconds. Adjust volume if necessary.
-4. At the pass, **Start receiving**. The page sets gain, sample rate, and Meteor
+   in **Availability**. Select free periods and use the date picker for days off.
+   Settings stay on the device.
+3. Attach the antenna and V3. The optional **Radio** mode plays **96.5 FM**
+   for up to 60 seconds. Satellite mode does not require this check.
+4. At the pass, select **Satellite → Start satellite reception**. The page sets gain, sample rate, and Meteor
    channel selection automatically. Keep the tab visible and the computer awake.
 5. Stop, choose a received channel, and **Save image + data**. The ZIP contains the
    unprojected grayscale PNG, corrected CADU frames, and JSON observation metadata
@@ -27,6 +28,14 @@ A webpage cannot install a Windows USB driver. On macOS, no separate driver is
 normally needed. Close other SDR software before connecting. An antenna suitable
 for Meteor's 137 MHz downlink is still required; audible FM alone does not establish
 that the antenna is suitable for satellite reception.
+
+The map starts in **Sunrise / Live** mode and recalculates positions every
+15 seconds. **Global** shows the world view; **Pass preview** shows the selected
+pass time. **Refresh** reloads the orbit catalogue and returns to live positions.
+
+The receiver dashboard shows tuned frequency, sample rate, measured relative
+power, spectrum, waterfall and elapsed time. Radio mode adds an audio waveform.
+CADU replay has no radio samples and explicitly leaves its spectrum empty.
 
 ## Validation status
 
