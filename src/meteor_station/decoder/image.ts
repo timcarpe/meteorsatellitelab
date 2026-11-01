@@ -11,6 +11,8 @@ export interface ImageSnapshot {
   readonly width: number;
   readonly height: number;
   readonly rgba: Uint8ClampedArray;
+  /** The channel whose pixels are present in rgba. */
+  readonly channel: number;
   readonly channels: readonly number[];
   readonly segments: number;
   readonly rejected: number;
@@ -105,6 +107,7 @@ export class MeteorImage {
       width: IMAGE_WIDTH,
       height,
       rgba,
+      channel: chosen,
       channels,
       segments: this.segments,
       rejected: this.rejected,

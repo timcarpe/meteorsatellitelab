@@ -44,6 +44,16 @@ All notable changes follow Keep a Changelog.
   a dash labelled “Unknown”.
 
 ### Fixed
+- Corrected the pinned Web RTL-SDR dependency's low-rate calculation: the requested
+  288 kS/s no longer reaches the FM and Meteor decoders as an incorrect 800 kS/s.
+- Cancelling receiver startup cannot revive a stopped session or let delayed
+  operations alter a replacement session.
+- Image channel selection and export metadata now follow the displayed pixels,
+  including after a new recording and while a channel change is pending.
+- Adjacent available school periods share setup and pack-away buffers, allowing
+  passes that cross bell boundaries while preserving unavailable gaps.
+- Selected reception windows survive small rise-time changes during automatic
+  planner recalculation.
 - Map and instrument text no longer shrinks with the panel width: labels keep a
   fixed on-screen size, and the Sunrise view crops around the campus on narrow
   screens.

@@ -27,6 +27,7 @@ export class Receiver {
   private active = false;
   private starting = false;
   private stopping: Promise<void> | null = null;
+  private cleaning: Promise<void> | null = null;
   private wakeLock: WakeLockSentinel | null = null;
   private audio: AudioContext | null = null;
   private audioGain: GainNode | null = null;
@@ -38,7 +39,9 @@ export class Receiver {
 
   public constructor(private readonly onEvent: (event: ReceiverEvent) => void) {}
   public get running(): boolean {
-    return this.active || this.starting || this.stopping !== null;
+    return (
+      this.active || this.starting || this.stopping !== null || this.cleaning !== null
+    );
   }
   public static get supported(): boolean {
     return isSecureContext && 'usb' in navigator;
@@ -53,7 +56,6 @@ export class Receiver {
       );
     this.starting = true;
     const generation = ++this.generation;
-    const chosen = new RTL2832U_Provider().get();
     try {
       if (mode === 'fm') {
         this.audio = new AudioContext();
@@ -63,24 +65,45 @@ export class Receiver {
         void this.audio.resume();
       }
       this.status('Choose your RTL-SDR in the browser’s USB window.');
-      const device = await chosen;
+      const device = await new RTL2832U_Provider().get();
       if (generation !== this.generation) {
         await device.close();
         throw new StationError('Reception was cancelled.');
       }
       this.device = device;
       this.status('Preparing the receiver…');
-      await this.device.setDirectSamplingMethod(DirectSampling.Off);
-      await this.device.enableBiasTee(false);
-      await this.device.setGain(mode === 'fm' ? 19.7 : 40.2);
-      const rate = await this.device.setSampleRate(288000);
-      const tuned = await this.device.setCenterFrequency(
+      await device.setDirectSamplingMethod(DirectSampling.Off);
+      this.ensureGeneration(generation);
+      await device.enableBiasTee(false);
+      this.ensureGeneration(generation);
+      await device.setGain(mode === 'fm' ? 19.7 : 40.2);
+      this.ensureGeneration(generation);
+      const rate = await device.setSampleRate(288000);
+      this.ensureGeneration(generation);
+      const tuned = await device.setCenterFrequency(
         mode === 'fm' ? 96500000 : frequency,
       );
       this.ensureGeneration(generation);
-      await this.openSession(mode, rate);
+      await this.openSession(mode, rate, generation);
       this.ensureGeneration(generation);
-      await this.device.resetBuffer();
+      await device.resetBuffer();
+      this.ensureGeneration(generation);
+      if ('wakeLock' in navigator) {
+        try {
+          const wakeLock = await navigator.wakeLock.request('screen');
+          if (generation !== this.generation) {
+            await wakeLock.release().catch(() => {});
+            return;
+          }
+          this.wakeLock = wakeLock;
+        } catch {
+          if (generation === this.generation)
+            this.status(
+              'Keep this tab visible and your computer awake while receiving.',
+            );
+        }
+      }
+      this.ensureGeneration(generation);
       this.info = {
         mode,
         sampleRate: rate,
@@ -89,14 +112,6 @@ export class Receiver {
       };
       this.active = true;
       this.starting = false;
-      if ('wakeLock' in navigator) {
-        try {
-          this.wakeLock = await navigator.wakeLock.request('screen');
-        } catch {
-          this.status('Keep this tab visible and your computer awake while receiving.');
-        }
-      }
-      this.ensureGeneration(generation);
       this.onEvent({ type: 'started', info: this.info });
       this.status(
         mode === 'fm'
@@ -104,12 +119,19 @@ export class Receiver {
           : 'Listening for Meteor. An image appears when valid satellite data arrives.',
       );
       this.timeout = setTimeout(
-        () => void this.stop().catch((error) => this.report(error)),
+        () => {
+          if (generation === this.generation)
+            void this.stop().catch((error) => this.report(error));
+        },
         mode === 'fm' ? 60000 : 20 * 60000,
       );
       void this.readLoop(mode, generation);
     } catch (error) {
-      if (generation === this.generation) await this.cleanup();
+      // Stop is a normal action. An obsolete start must not report an error into
+      // the UI of a newer session, or clean up that session's resources.
+      if (generation !== this.generation) return;
+      await this.cleanup();
+      if (generation !== this.generation) return;
       const message = errorMessage(error);
       if (error instanceof StationError) throw error;
       if (/cancel|No device selected/i.test(message))
@@ -139,7 +161,7 @@ export class Receiver {
     this.starting = true;
     const generation = ++this.generation;
     try {
-      await this.openSession(mode, rate);
+      const session = await this.openSession(mode, rate, generation);
       this.ensureGeneration(generation);
       this.info = {
         mode,
@@ -155,12 +177,18 @@ export class Receiver {
           ? 'Replaying recorded Meteor frames. This does not test the USB receiver.'
           : 'Decoding an IQ file in your browser.',
       );
-      for (let offset = 0; offset < data.length && this.active; offset += 65536) {
-        await this.session!.send(data.slice(offset, offset + 65536).buffer);
+      for (
+        let offset = 0;
+        offset < data.length && this.active && generation === this.generation;
+        offset += 65536
+      ) {
+        await session.send(data.slice(offset, offset + 65536).buffer);
       }
       if (generation === this.generation) await this.stop();
     } catch (error) {
-      if (generation === this.generation) await this.cleanup();
+      if (generation !== this.generation) return;
+      await this.cleanup();
+      if (generation !== this.generation) return;
       throw error;
     }
   }
@@ -200,25 +228,42 @@ export class Receiver {
     return this.stopping;
   }
 
-  private async openSession(mode: Mode, rate: number): Promise<void> {
+  private async openSession(
+    mode: Mode,
+    rate: number,
+    generation: number,
+  ): Promise<WorkerSession> {
     this.latestFrames = 0;
-    this.session = new WorkerSession((event) => {
+    const session = new WorkerSession((event) => {
+      if (this.session !== session) return;
+      // Finish may publish the last image/ack while Stop drains this session.
+      // Errors from a cancelled worker are handled by finish(), not by a new UI.
+      if (generation !== this.generation && (!this.stopping || event.type === 'error'))
+        return;
       if (event.type === 'ack') this.latestFrames = event.frames;
       if (event.type === 'audio') this.playAudio(event.data);
       this.onEvent(event);
     });
-    await this.session.start(mode, rate);
+    this.session = session;
+    await session.start(mode, rate);
+    this.ensureGeneration(generation);
+    return session;
   }
   private async readLoop(mode: 'meteor' | 'fm', generation: number): Promise<void> {
     const inFlight = new Set<Promise<void>>();
     let failure: Error | null = null;
     let tunedAt = Date.now();
     try {
-      while (this.active && this.device && this.session) {
+      while (
+        this.active &&
+        generation === this.generation &&
+        this.device &&
+        this.session
+      ) {
         const device = this.device;
         const session = this.session;
         if (failure) throw failure;
-        if (this.session.queued >= 4)
+        if (session.queued >= 4)
           throw new StationError(
             'Reception stopped because this computer fell behind. Close other apps and try again.',
           );
@@ -250,7 +295,7 @@ export class Receiver {
           );
           const tuned = await device.setCenterFrequency(frequency);
           if (!this.active || generation !== this.generation) break;
-          await this.openSession(mode, this.info!.sampleRate);
+          await this.openSession(mode, this.info!.sampleRate, generation);
           if (!this.active || generation !== this.generation) break;
           await device.resetBuffer();
           if (!this.active || generation !== this.generation) break;
@@ -260,7 +305,7 @@ export class Receiver {
         }
       }
     } catch (error) {
-      if (this.active) {
+      if (this.active && generation === this.generation) {
         console.error('Receiver:', error);
         this.onEvent({ type: 'error', message: errorMessage(error) });
         try {
@@ -283,28 +328,38 @@ export class Receiver {
     source.start(this.nextAudio);
     this.nextAudio += samples.length / 48000;
   }
-  private async cleanup(): Promise<void> {
+  private cleanup(): Promise<void> {
+    if (this.cleaning) return this.cleaning;
     this.active = false;
-    this.starting = false;
     if (this.timeout) clearTimeout(this.timeout);
     this.timeout = null;
     this.session?.close();
     this.session = null;
     const device = this.device;
     this.device = null;
-    if (device) {
-      try {
-        await device.close();
-      } catch (error) {
-        console.error('USB cleanup:', error);
-      }
-    }
-    await this.wakeLock?.release().catch(() => {});
+    const wakeLock = this.wakeLock;
     this.wakeLock = null;
-    await this.audio?.close().catch(() => {});
+    const audio = this.audio;
     this.audio = null;
     this.audioGain = null;
     this.nextAudio = 0;
+    // Snapshot and detach before yielding. New starts stay blocked until these
+    // resources are closed, including when Stop joins failed-start cleanup.
+    this.cleaning = (async () => {
+      if (device) {
+        try {
+          await device.close();
+        } catch (error) {
+          console.error('USB cleanup:', error);
+        }
+      }
+      await wakeLock?.release().catch(() => {});
+      await audio?.close().catch(() => {});
+    })().finally(() => {
+      this.starting = false;
+      this.cleaning = null;
+    });
+    return this.cleaning;
   }
   private status(message: string): void {
     this.onEvent({ type: 'status', message });

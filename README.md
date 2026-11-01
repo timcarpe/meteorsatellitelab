@@ -72,6 +72,13 @@ pnpm test:coverage
 pnpm build
 ```
 
+The pinned Web RTL-SDR dependency has a local patch in `patches/`, registered in
+`pnpm-workspace.yaml`. It restores a resampler ratio bit when calculating the
+reported sample rate, so a requested 288 kS/s is reported correctly instead of
+800 kS/s. `pnpm install --frozen-lockfile` applies the patch; both files are included
+in the downloadable source archive. The receiver regression tests exercise the
+patched library's real sample-rate calculation with register writes stubbed.
+
 `dist/meteor-station.html` embeds JavaScript, worker, WASM, fonts, Earth geometry,
 the sample recording, and the saved orbit catalogue. Its radio and replay paths
 work without downloading decoder assets. Fresh orbital elements require a network

@@ -1,0 +1,2 @@
+patchedDependencies:
+  '@jtarrio/webrtlsdr@3.0.7': patches/@jtarrio__webrtlsdr@3.0.7.patch

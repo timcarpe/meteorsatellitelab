@@ -17,6 +17,7 @@ import {
   DEFAULT_MATCH,
   matchPasses,
   parseSchoolDates,
+  preserveReceptionWindow,
 } from '@meteor/timetable/matching';
 import { EarthMap, type MapView } from '@meteor/map/earth';
 import {
@@ -27,6 +28,7 @@ import {
 import { saveObservation, exportCalendar } from '@meteor/exports/observation';
 import { SpectrumView } from '@meteor/radio/spectrum-view';
 import { AudioView } from '@meteor/radio/audio-view';
+import { ImageView } from '@meteor/ui/image-view';
 import { compass, dayText, timeText, downloadBlob } from '@meteor/ui/format';
 
 const satIcon =
@@ -129,7 +131,7 @@ app.innerHTML = `
     <div class="dialog-body">
       <section aria-labelledby="periods-title"><h3 id="periods-title">School day</h3><p>Breaks are always included. Tick a lesson only if you are free then or have your teacher’s permission.</p><div id="lesson-options" class="day-list"></div><label class="switch-row"><span><strong>Any time (testing)</strong><span>Ignore bell times and weekends and list every pass, day or night. Days off still apply.</span></span><input id="any-time" type="checkbox" role="switch" class="switch" /></label></section>
       <section aria-labelledby="days-title"><h3 id="days-title">Days you cannot attend</h3><p>Holidays, trips or other days off.</p><div class="date-entry"><label class="field-label">Date<input id="excluded-date" type="date" /></label><button id="add-excluded-date" class="button outlined">Add day</button></div><p id="availability-error" role="alert" hidden></p><div id="excluded-date-list" class="date-list" aria-live="polite"></div></section>
-      <details class="timetable-reference"><summary>How windows are matched</summary><p>Passes are predicted for a rolling ${PLAN_DAYS} days from now and recalculated every minute, so new days appear as time passes. Windows use the regular Monday–Friday Secondary bell times; breaks come first, with 5 minutes to set up and 3 minutes to pack away. The planner lists ${LIST_LIMIT} windows at a time.</p><a href="${TIMETABLE_SOURCE}" target="_blank" rel="noreferrer">View the Secondary bell times</a></details>
+      <details class="timetable-reference"><summary>How windows are matched</summary><p>Passes are predicted for a rolling ${PLAN_DAYS} days from now and recalculated every minute, so new days appear as time passes. Windows use the regular Monday–Friday Secondary bell times. Adjacent available periods are joined, with 5 minutes to set up and 3 minutes to pack away for the session. Sessions entirely within breaks come first. The planner lists ${LIST_LIMIT} windows at a time.</p><a href="${TIMETABLE_SOURCE}" target="_blank" rel="noreferrer">View the Secondary bell times</a></details>
     </div>
     <div class="dialog-actions"><span>Saved on this device</span><button id="cancel-timetable" class="button text">Cancel</button><button id="save-timetable" class="button primary">Save</button></div>
   </dialog>
@@ -161,7 +163,6 @@ let showAllWindows = false;
 let captureInfo: ReceiverInfo | null = null;
 let capturedFrames = new ArrayBuffer(0);
 let capturePlan: ReceptionWindow | null = null;
-let capturedChannels: readonly number[] = [];
 let captureOrbits = snapshot;
 let lastError = '';
 let toastTimer: ReturnType<typeof setTimeout>;
@@ -186,6 +187,10 @@ try {
 const map = new EarthMap(element('earth-map'));
 const spectrum = new SpectrumView(element<HTMLCanvasElement>('signal-plot'));
 const audioView = new AudioView(element<HTMLCanvasElement>('audio-plot'));
+const imageView = new ImageView(
+  element<HTMLCanvasElement>('weather-image'),
+  element<HTMLSelectElement>('channel'),
+);
 const mapTime = new Intl.DateTimeFormat('en-GB', {
   timeZone: SCHOOL_TIMEZONE,
   hour: '2-digit',
@@ -339,8 +344,7 @@ function rebuildPlan(): void {
       (button) =>
         (button.onclick = () => selectWindow(windows[Number(button.dataset.index)]!)),
     );
-  const previous =
-    selected && windows.find((window) => window.pass.id === selected!.pass.id);
+  const previous = preserveReceptionWindow(selected, windows);
   if (windows.length)
     selectWindow(previous || windows[0]!, previous ? previewAt !== null : false);
   else {
@@ -383,7 +387,9 @@ function receiverButtons(busy: boolean): void {
       button.disabled = busy;
     });
   element<HTMLInputElement>('recording-file').disabled = busy;
-  element<HTMLButtonElement>('save-image').disabled = busy || !capturedChannels.length;
+  element<HTMLSelectElement>('channel').disabled = busy || imageView.channel === null;
+  element<HTMLButtonElement>('save-image').disabled =
+    busy || imageView.channel === null;
 }
 
 function onReceiverEvent(event: ReceiverEvent): void {
@@ -431,7 +437,8 @@ function onReceiverEvent(event: ReceiverEvent): void {
       capturePlan = selected;
       captureOrbits = snapshot;
       capturedFrames = new ArrayBuffer(0);
-      capturedChannels = [];
+      imageView.reset();
+      element('channel-label').hidden = true;
       element('image-source').textContent =
         event.info.mode === 'meteor'
           ? 'Live receiver'
@@ -467,33 +474,11 @@ function onReceiverEvent(event: ReceiverEvent): void {
       element('status-title').textContent = 'Meteor data received';
   }
   if (event.type === 'image') {
-    const canvas = element<HTMLCanvasElement>('weather-image');
-    canvas.width = event.image.width;
-    canvas.height = event.image.height;
-    canvas
-      .getContext('2d')!
-      .putImageData(
-        new ImageData(
-          new Uint8ClampedArray(event.image.rgba),
-          event.image.width,
-          event.image.height,
-        ),
-        0,
-        0,
-      );
+    imageView.update(event.image);
     element('image-empty').hidden = true;
     element('canvas-wrap').hidden = false;
     element('image-height').textContent = `${event.image.height}`;
     element('segment-count').textContent = event.image.segments.toLocaleString();
-    const select = element<HTMLSelectElement>('channel');
-    if (capturedChannels.join(',') !== event.image.channels.join(',')) {
-      const value = select.value;
-      select.innerHTML = event.image.channels
-        .map((channel) => `<option value="${channel}">${channel}</option>`)
-        .join('');
-      if (event.image.channels.includes(Number(value))) select.value = value;
-      capturedChannels = event.image.channels;
-    }
     element('channel-label').hidden = false;
   }
   if (event.type === 'error') {
@@ -504,7 +489,8 @@ function onReceiverEvent(event: ReceiverEvent): void {
     toast(event.message);
   }
   if (event.type === 'stopped') {
-    if (receiver.info?.mode !== 'fm') {
+    // Cancelling setup before "started" keeps the previous image and its archive.
+    if (sessionStarted !== null && receiver.info?.mode !== 'fm') {
       capturedFrames = event.frames;
       element('frame-count').textContent = (
         capturedFrames.byteLength / 1024
@@ -520,13 +506,13 @@ function onReceiverEvent(event: ReceiverEvent): void {
       element('status-title').textContent =
         receiver.info?.mode === 'fm'
           ? 'Radio check finished'
-          : capturedChannels.length
+          : imageView.channel !== null
             ? 'Image ready'
             : 'Reception stopped';
       element('status-message').textContent =
         receiver.info?.mode === 'fm'
           ? 'Audio confirms the radio path. Meteor reception needs a satellite pass.'
-          : capturedChannels.length
+          : imageView.channel !== null
             ? 'Save the image and received data.'
             : 'No image data decoded in this session. Try during a pass with a clear sky view.';
     }
@@ -672,7 +658,7 @@ element<HTMLInputElement>('recording-file').onchange = (event) => {
     );
 };
 element('save-image').onclick = () => {
-  if (captureInfo)
+  if (captureInfo && imageView.channel !== null)
     void saveObservation(
       element<HTMLCanvasElement>('weather-image'),
       capturedFrames,
@@ -680,8 +666,8 @@ element('save-image').onclick = () => {
       SUNRISE,
       captureOrbits,
       capturePlan,
-      capturedChannels,
-      Number(element<HTMLSelectElement>('channel').value),
+      imageView.channels,
+      imageView.channel,
     ).catch((error) => toast(errorMessage(error)));
 };
 element('map-preview').onclick = () => {
