@@ -2,6 +2,7 @@
 import '@meteor/ui/style.css';
 import '@meteor/ui/fonts.css';
 import '@meteor/ui/capture.css';
+import '@meteor/ui/signal.css';
 import { CapturePanel } from '@meteor/capture/panel';
 import type { CaptureRecord } from '@meteor/capture/model';
 import replayUrl from '@meteor/data/replay.cadu?url';
@@ -99,17 +100,23 @@ app.innerHTML = `
             <div class="receiver-status" role="status" aria-live="polite"><span id="status-dot" class="status-dot"></span><div><strong id="status-title">Ready</strong><p id="status-message">Connect your V3 and antenna, then start.</p></div></div>
             <p id="mode-note" class="fine-print">Keep this tab visible and the computer awake while receiving.</p>
           </div>
-          <section class="signal-section" aria-labelledby="signal-title">
-            <div class="signal-header"><h2 id="signal-title">Radio spectrum</h2><span>Relative power · dBFS</span></div>
-            <canvas id="signal-plot" aria-label="Measured radio spectrum and waterfall; empty until IQ samples arrive"></canvas>
+          <section class="signal-section" id="signal-section" aria-labelledby="signal-title">
+            <div class="signal-header"><div><h2 id="signal-title">Live spectrum</h2><p>Measured radio power · frequency and waterfall</p></div><span class="monitor-state" id="spectrum-state" role="status">No samples</span></div>
+            <div class="signal-plot-wrap"><canvas id="signal-plot" aria-label="Measured dBFS radio spectrum above, and recent radio power waterfall below; the middle guide is the tuned frequency"></canvas><div class="spectrum-legend"><span>Low</span><span class="spectrum-ramp" aria-hidden="true"></span><span>High power</span></div></div>
+            <div class="signal-readouts" aria-label="Live spectrum measurements">
+              <div><span>Strongest frequency</span><strong id="spectrum-peak">—</strong><small id="spectrum-peak-level">Peak · — dBFS</small></div>
+              <div><span>Background</span><strong id="spectrum-floor">—</strong><small>Median · dBFS</small></div>
+              <div><span>Above background</span><strong id="spectrum-contrast">—</strong><small>Relative · dB</small></div>
+            </div>
             <div class="signal-detail"><span>Input level</span><meter id="signal-meter" min="0" max="1" value="0" aria-label="Radio input level"></meter><span id="signal-label">No samples</span></div>
+            <p class="signal-caveat">A visible peak is not proof of a satellite signal. Decoded frames and image segments confirm recovery.</p>
             <div class="receiver-metrics"><div><span>Elapsed</span><strong id="elapsed-time">00:00</strong></div><div><span>Samples</span><strong id="sample-count">—</strong></div><div><span>Frame gaps</span><strong id="data-gaps">—</strong></div></div>
           </section>
         </article>
         <div class="output-stack">
           <article class="image-card" id="satellite-output">
             <div class="card-header"><h2>Weather image</h2><span id="image-source">No data</span></div>
-            <div id="image-empty" class="image-empty"><p id="image-waiting">Images appear automatically when Meteor image packets are decoded. A moving spectrum does not by itself confirm a satellite signal. You can export a session even without an image.</p></div>
+            <div id="image-empty" class="image-empty"><div class="image-empty-art" aria-hidden="true"><svg viewBox="0 0 100 66" fill="none"><rect x="8" y="5" width="84" height="56" rx="5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 4"/><path d="M9 25h82M9 43h82" stroke="currentColor" opacity=".4"/><path d="M28 47l15-15 11 10 12-16 14 21" stroke="currentColor" stroke-width="1.5" opacity=".75"/><circle cx="32" cy="21" r="5" stroke="currentColor" stroke-width="1.5"/></svg></div><h3 id="image-empty-heading">Image builds automatically</h3><p id="image-waiting">Meteor image packets will appear here as they are decoded. You can export a session even if no image is recovered.</p><span class="image-empty-note">No extra processing button is needed</span></div>
             <div id="canvas-wrap" hidden><canvas id="weather-image" aria-label="Decoded grayscale MSU-MR weather image"></canvas></div>
             <div class="image-stats"><span><strong id="frame-count">0</strong> frames</span><span><strong id="segment-count">0</strong> segments</span><span><strong id="image-height">—</strong> lines</span></div>
             <div class="image-actions"><label id="channel-label" hidden>Channel <select id="channel"></select></label><button id="save-image" class="button primary" disabled>Download image</button></div>
@@ -190,6 +197,16 @@ try {
 }
 const map = new EarthMap(element('earth-map'));
 const spectrum = new SpectrumView(element<HTMLCanvasElement>('signal-plot'));
+let spectrumHasSamples = false;
+function clearSpectrumReadout(state: string): void {
+  spectrumHasSamples = false;
+  element('signal-section').dataset.monitor = 'idle';
+  element('spectrum-state').textContent = state;
+  element('spectrum-peak').textContent = '—';
+  element('spectrum-peak-level').textContent = 'Peak · — dBFS';
+  element('spectrum-floor').textContent = '—';
+  element('spectrum-contrast').textContent = '—';
+}
 const audioView = new AudioView(element<HTMLCanvasElement>('audio-plot'));
 const imageView = new ImageView(
   element<HTMLCanvasElement>('weather-image'),
@@ -399,11 +416,28 @@ function receiverButtons(busy: boolean): void {
 }
 
 function onReceiverEvent(event: ReceiverEvent): void {
-  if (event.type === 'spectrum') spectrum.update(event.data);
+  if (event.type === 'spectrum') {
+    const reading = spectrum.update(event.data);
+    if (reading) {
+      spectrumHasSamples = true;
+      element('signal-section').dataset.monitor = 'live';
+      const monitorLabel = receiver.info?.mode === 'iq-file' ? 'Recorded IQ' : 'Live samples';
+      if (element('spectrum-state').textContent !== monitorLabel)
+        element('spectrum-state').textContent = monitorLabel;
+      const knownCenter = (receiver.info?.frequency ?? 0) > 0;
+      element('spectrum-peak').textContent = knownCenter
+        ? `${(reading.peakFrequencyHz / 1e6).toFixed(3)}`
+        : `${reading.peakFrequencyHz >= 0 ? '+' : ''}${(reading.peakFrequencyHz / 1000).toFixed(1)}`;
+      element('spectrum-peak-level').textContent = `${knownCenter ? 'MHz' : 'kHz offset'} · peak ${reading.peakDbfs.toFixed(0)} dBFS`;
+      element('spectrum-floor').textContent = `${reading.baselineDbfs.toFixed(0)} dBFS`;
+      element('spectrum-contrast').textContent = `+${reading.aboveFloorDb.toFixed(0)} dB`;
+    }
+  }
   if (event.type === 'audio') audioView.update(event.data);
   if (event.type === 'tuned') {
     updateInstrument(event.info);
     spectrum.reset('Waiting for samples on this channel');
+    clearSpectrumReadout('Retuning');
   }
   if (event.type === 'status') element('status-message').textContent = event.message;
   if (event.type === 'started') {
@@ -414,6 +448,7 @@ function onReceiverEvent(event: ReceiverEvent): void {
         ? 'Frame replay · no radio samples'
         : 'Waiting for radio samples',
     );
+    clearSpectrumReadout(event.info.mode === 'replay' ? 'No radio samples in CADU' : 'Waiting for IQ');
     audioView.reset();
     sampleCount = 0;
     element<HTMLMeterElement>('signal-meter').value = 0;
@@ -440,7 +475,8 @@ function onReceiverEvent(event: ReceiverEvent): void {
       receiver.volume(Number(element<HTMLInputElement>('volume').value) / 100);
     if (event.info.mode !== 'fm') {
       imageGeneration++;
-      element('image-waiting').textContent = 'Waiting for decoded image packets. Images appear automatically; you can export the recording even if no image is recovered.';
+      element('image-empty-heading').textContent = 'Scanning for image packets';
+      element('image-waiting').textContent = 'Image lines appear automatically if Meteor frames decode. The recording remains exportable without an image.';
       capturedFrames = new ArrayBuffer(0);
       imageView.reset();
       element('channel-label').hidden = true;
@@ -494,6 +530,14 @@ function onReceiverEvent(event: ReceiverEvent): void {
     toast(event.message);
   }
   if (event.type === 'stopped') {
+    element('signal-section').dataset.monitor = 'idle';
+    element('spectrum-state').textContent = spectrumHasSamples
+      ? 'Last measured'
+      : receiver.info?.mode === 'replay' ? 'No radio samples' : 'No IQ samples';
+    if (imageView.channel === null && receiver.info?.mode !== 'fm') {
+      element('image-empty-heading').textContent = 'No image recovered';
+      element('image-waiting').textContent = 'The receiver did not decode a usable image. Check Your reception for radio samples and recovered frames, then export the session report.';
+    }
     // Cancelling setup before "started" keeps the previous image and its archive.
     if (sessionStarted !== null && receiver.info?.mode !== 'fm') {
       capturedFrames = event.frames;
@@ -547,6 +591,7 @@ capturePanel = new CapturePanel({
     element('image-empty').hidden = false;
     element('channel-label').hidden = true;
     element('image-source').textContent = 'No session selected';
+    element('image-empty-heading').textContent = 'Ready for reception';
     element('image-waiting').textContent = 'Start live reception or review another saved session.';
     receiverButtons(false);
   },
@@ -560,6 +605,7 @@ async function reviewCapture(record: CaptureRecord, frames: ArrayBuffer): Promis
   element('image-empty').hidden = false;
   element('canvas-wrap').hidden = true;
   element('channel-label').hidden = true;
+  element('image-empty-heading').textContent = 'No image recovered';
   element('image-waiting').textContent = 'No usable image was recovered in this session. Export session retains the radio recording and a report of what was captured.';
   element('frame-count').textContent = record.framesDecoded.toLocaleString();
   element('segment-count').textContent = record.imageSegments.toLocaleString();
@@ -568,6 +614,7 @@ async function reviewCapture(record: CaptureRecord, frames: ArrayBuffer): Promis
   updateInstrument(record.input);
   setReceiverState(record.errors.length ? 'error' : 'stopped', 'Saved session');
   spectrum.reset('Saved session · spectrum is live-only; export raw data to inspect it');
+  clearSpectrumReadout('Saved session');
   if (!frames.byteLength) return;
   const [{ PacketAssembler }, { MeteorImage }] = await Promise.all([
     import('@meteor/decoder/packets'), import('@meteor/decoder/image'),
@@ -640,6 +687,7 @@ function setReceiverMode(mode: 'meteor' | 'fm', force = false): void {
       startedAt: '',
     });
     spectrum.reset('Start reception to view the signal');
+    clearSpectrumReadout('No samples');
     audioView.reset();
     setReceiverState('idle', 'Idle');
     element('signal-label').textContent = 'No samples';
