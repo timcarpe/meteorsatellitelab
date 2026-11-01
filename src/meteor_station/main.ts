@@ -1,6 +1,9 @@
 /** Student station entry point: plan, check the radio, receive, and save. */
 import '@meteor/ui/style.css';
 import '@meteor/ui/fonts.css';
+import '@meteor/ui/capture.css';
+import { CapturePanel } from '@meteor/capture/panel';
+import type { CaptureRecord } from '@meteor/capture/model';
 import replayUrl from '@meteor/data/replay.cadu?url';
 import notices from '../../THIRD_PARTY_NOTICES.txt?raw';
 import { SUNRISE, SCHOOL_TIMEZONE, type ReceptionWindow } from '@meteor/core/models';
@@ -25,7 +28,7 @@ import {
   type ReceiverEvent,
   type ReceiverInfo,
 } from '@meteor/radio/receiver';
-import { saveObservation, exportCalendar } from '@meteor/exports/observation';
+import { exportCalendar } from '@meteor/exports/observation';
 import { SpectrumView } from '@meteor/radio/spectrum-view';
 import { AudioView } from '@meteor/radio/audio-view';
 import { ImageView } from '@meteor/ui/image-view';
@@ -92,12 +95,12 @@ app.innerHTML = `
           <div class="receiver-body">
             <p id="frequency-note">Automatically checks 137.9 and 137.1 MHz.</p>
             <p id="antenna-plan" class="antenna-plan">Select a pass in Plan.</p>
-            <div class="receiver-actions"><button id="meteor-start" class="button primary">Start satellite reception</button><button id="fm-start" class="button primary" hidden>Listen to 96.5 FM</button><button id="stop" class="button danger" hidden>Stop</button></div>
+            <div class="receiver-actions"><button id="meteor-start" class="button primary">Start live reception</button><button id="fm-start" class="button primary" hidden>Listen to 96.5 FM</button><button id="stop" class="button danger" hidden>Stop</button></div>
             <div class="receiver-status" role="status" aria-live="polite"><span id="status-dot" class="status-dot"></span><div><strong id="status-title">Ready</strong><p id="status-message">Connect your V3 and antenna, then start.</p></div></div>
             <p id="mode-note" class="fine-print">Keep this tab visible and the computer awake while receiving.</p>
           </div>
           <section class="signal-section" aria-labelledby="signal-title">
-            <div class="signal-header"><h2 id="signal-title">Signal</h2><span>Relative power · dBFS</span></div>
+            <div class="signal-header"><h2 id="signal-title">Radio spectrum</h2><span>Relative power · dBFS</span></div>
             <canvas id="signal-plot" aria-label="Measured radio spectrum and waterfall; empty until IQ samples arrive"></canvas>
             <div class="signal-detail"><span>Input level</span><meter id="signal-meter" min="0" max="1" value="0" aria-label="Radio input level"></meter><span id="signal-label">No samples</span></div>
             <div class="receiver-metrics"><div><span>Elapsed</span><strong id="elapsed-time">00:00</strong></div><div><span>Samples</span><strong id="sample-count">—</strong></div><div><span>Frame gaps</span><strong id="data-gaps">—</strong></div></div>
@@ -106,11 +109,11 @@ app.innerHTML = `
         <div class="output-stack">
           <article class="image-card" id="satellite-output">
             <div class="card-header"><h2>Weather image</h2><span id="image-source">No data</span></div>
-            <div id="image-empty" class="image-empty"><p>Image strips appear here as they arrive.</p><button id="replay" class="button outlined">Try recorded data</button></div>
+            <div id="image-empty" class="image-empty"><p id="image-waiting">Images appear automatically when Meteor image packets are decoded. A moving spectrum does not by itself confirm a satellite signal. You can export a session even without an image.</p></div>
             <div id="canvas-wrap" hidden><canvas id="weather-image" aria-label="Decoded grayscale MSU-MR weather image"></canvas></div>
             <div class="image-stats"><span><strong id="frame-count">0</strong> frames</span><span><strong id="segment-count">0</strong> segments</span><span><strong id="image-height">—</strong> lines</span></div>
-            <div class="image-actions"><label id="channel-label" hidden>Channel <select id="channel"></select></label><button id="save-image" class="button primary" disabled>Save image + data</button></div>
-            <p class="fine-print image-caption" id="image-caption">PNG, received frames and observation details.</p>
+            <div class="image-actions"><label id="channel-label" hidden>Channel <select id="channel"></select></label><button id="save-image" class="button primary" disabled>Download image</button></div>
+            <p class="fine-print image-caption" id="image-caption">The image is live output. Use Export session for the recording and reception report.</p>
           </article>
           <article class="radio-card" id="radio-output" hidden>
             <div class="card-header"><h2>Radio audio</h2><span>96.5 FM · Mono</span></div>
@@ -119,7 +122,8 @@ app.innerHTML = `
           </article>
         </div>
       </div>
-      <details class="advanced"><summary>Recording files and USB help</summary><div class="advanced-content"><div><h3>Open a recording</h3><p>CADU image packets or raw unsigned 8-bit IQ at 288,000 samples/second.</p><label class="file-label">File type <select id="recording-kind"><option value="replay">Meteor CADU frames</option><option value="iq-file">Raw IQ · CU8 · 288 kS/s</option></select></label><input id="recording-file" type="file" accept=".cadu,.cu8,.raw,.bin" /></div><div><h3>USB connection</h3><p>Use Chrome or Edge. Close any other app using the receiver.</p><p>Windows may need WinUSB for <strong>Bulk-In, Interface 0</strong>. Follow the <a href="https://www.rtl-sdr.com/rtl-sdr-quick-start-guide/" target="_blank" rel="noreferrer">RTL-SDR setup guide</a>.</p><p>Mac usually needs no separate driver. Live V3 testing is pending.</p></div></div></details>
+      <details class="advanced" id="receiver-tools"><summary>Open a recording or get USB help</summary><div class="advanced-content"><div><h3>Open a recording</h3><p>Reopen decoded frames (.cadu) or a raw tuning file (.cu8) from an exported session. Raw files are streamed at 288,000 samples/second; no whole-file memory load. Stop before opening another recording.</p><label class="file-label">File type <select id="recording-kind"><option value="replay">Meteor CADU frames</option><option value="iq-file">Raw IQ · CU8 · 288 kS/s</option></select></label><input id="recording-file" type="file" accept=".cadu,.cu8,.raw,.bin" /></div><div><h3>USB connection</h3><p>Use Chrome or Edge. Close any other app using the receiver.</p><p>Windows may need WinUSB for <strong>Bulk-In, Interface 0</strong>. Follow the <a href="https://www.rtl-sdr.com/rtl-sdr-quick-start-guide/" target="_blank" rel="noreferrer">RTL-SDR setup guide</a>.</p><p>Mac usually needs no separate driver. Live V3 testing is pending.</p></div></div></details>
+      <details class="advanced" id="diagnostics"><summary>Diagnostics and sample data</summary><div class="advanced-content"><div><h3>Bundled sample replay</h3><p>This is a known test recording, not data from your antenna. It does not develop or process your live capture. Earlier sessions remain in Saved sessions.</p><button id="replay" class="button outlined">Run bundled sample (not live)</button></div></div></details>
     </section>
     <footer>
       <details class="orbit-info"><summary>Orbit data</summary><p id="orbit-source"></p><div class="data-actions"><button id="refresh-orbits" class="button text">Refresh</button><button id="export-orbits" class="button text">Export JSON</button></div></details>
@@ -138,7 +142,7 @@ app.innerHTML = `
   <dialog id="help-dialog" aria-labelledby="help-title">
     <div class="dialog-header"><h2 id="help-title">Station guide</h2><form method="dialog"><button class="dialog-close" aria-label="Close station guide">×</button></form></div>
     <div class="dialog-body">
-      <ol class="guide-list"><li>Select a pass. Use Sunrise for the regional path or Global for the full orbit.</li><li>Connect your V3 and antenna. Radio mode offers an optional 96.5 FM check.</li><li>Start satellite reception before the pass. Stay outside with a clear view of the sky and keep this tab visible.</li><li>Stop, then save your image and data.</li></ol>
+      <ol class="guide-list"><li>Select a pass. Use Sunrise for the regional path or Global for the full orbit.</li><li>Connect your V3 and antenna. Radio mode offers an optional 96.5 FM check.</li><li>Start satellite reception before the pass. Stay outside with a clear view of the sky and keep this tab visible.</li><li>Images build automatically. Stop, then use Export session to choose a file location, even when no image was recovered. Earlier sessions remain in Saved sessions on this device.</li></ol>
       <details><summary>Reception and testing</summary><p id="validation-summary">Recorded images and generated OQPSK decoding are tested. Live V3 reception is pending. Hearing FM confirms the radio path; Meteor also needs a suitable antenna and an active transmitter.</p></details>
       <details><summary>Orbit data and offline use</summary><p>The hosted station refreshes its orbit data. Downloaded copies can import an updated JSON file. Predictions are flagged after seven days and disabled after fourteen.</p><input id="orbit-file" type="file" accept="application/json,.json" /></details>
       <p class="fine-print">CelesTrak · satellite.js · Natural Earth · Web RTL-SDR · MeteorDemod · libcorrect · jpeg-js. <a href="./THIRD_PARTY_NOTICES.txt" target="_blank">Licenses and sources</a></p>
@@ -160,10 +164,10 @@ let sampleCount = 0;
 let excludedDates: string[] = [];
 let anyTime = false;
 let showAllWindows = false;
-let captureInfo: ReceiverInfo | null = null;
 let capturedFrames = new ArrayBuffer(0);
-let capturePlan: ReceptionWindow | null = null;
-let captureOrbits = snapshot;
+let capturePanel: CapturePanel | null = null;
+let imageGeneration = 0;
+let pendingAction = 0;
 let lastError = '';
 let toastTimer: ReturnType<typeof setTimeout>;
 try {
@@ -378,6 +382,7 @@ function setReceiverState(state: ReceiverState, label: string): void {
 }
 
 function receiverButtons(busy: boolean): void {
+  busy = busy || Boolean(capturePanel?.busy);
   for (const id of ['fm-start', 'meteor-start', 'replay'])
     element<HTMLButtonElement>(id).disabled = busy;
   element<HTMLButtonElement>('stop').hidden = !busy;
@@ -390,6 +395,7 @@ function receiverButtons(busy: boolean): void {
   element<HTMLSelectElement>('channel').disabled = busy || imageView.channel === null;
   element<HTMLButtonElement>('save-image').disabled =
     busy || imageView.channel === null;
+  capturePanel?.setControlsBusy(busy);
 }
 
 function onReceiverEvent(event: ReceiverEvent): void {
@@ -433,9 +439,8 @@ function onReceiverEvent(event: ReceiverEvent): void {
     if (event.info.mode === 'fm')
       receiver.volume(Number(element<HTMLInputElement>('volume').value) / 100);
     if (event.info.mode !== 'fm') {
-      captureInfo = event.info;
-      capturePlan = selected;
-      captureOrbits = snapshot;
+      imageGeneration++;
+      element('image-waiting').textContent = 'Waiting for decoded image packets. Images appear automatically; you can export the recording even if no image is recovered.';
       capturedFrames = new ArrayBuffer(0);
       imageView.reset();
       element('channel-label').hidden = true;
@@ -495,7 +500,6 @@ function onReceiverEvent(event: ReceiverEvent): void {
       element('frame-count').textContent = (
         capturedFrames.byteLength / 1024
       ).toLocaleString();
-      if (receiver.info) captureInfo = receiver.info;
     }
     receiverButtons(false);
     updateElapsed();
@@ -517,8 +521,66 @@ function onReceiverEvent(event: ReceiverEvent): void {
             : 'No image data decoded in this session. Try during a pass with a clear sky view.';
     }
   }
+  capturePanel?.handle(event);
 }
-const receiver = new Receiver(onReceiverEvent);
+const receiver = new Receiver(onReceiverEvent, (data, info) => {
+  if (!capturePanel) throw new Error('The recording interface is not ready.');
+  capturePanel.raw(data, info);
+});
+capturePanel = new CapturePanel({
+  receiver,
+  canvas: element<HTMLCanvasElement>('weather-image'),
+  context: () => ({ observer: SUNRISE, plannedWindow: selected, orbitalElements: snapshot }),
+  busy: receiverButtons,
+  toast,
+  frames: (frames) => {
+    if (frames.byteLength > capturedFrames.byteLength) {
+      capturedFrames = frames;
+      element('frame-count').textContent = String(frames.byteLength / 1024);
+    }
+  },
+  clear: () => {
+    imageGeneration++;
+    capturedFrames = new ArrayBuffer(0);
+    imageView.reset();
+    element('canvas-wrap').hidden = true;
+    element('image-empty').hidden = false;
+    element('channel-label').hidden = true;
+    element('image-source').textContent = 'No session selected';
+    element('image-waiting').textContent = 'Start live reception or review another saved session.';
+    receiverButtons(false);
+  },
+  review: reviewCapture,
+});
+
+async function reviewCapture(record: CaptureRecord, frames: ArrayBuffer): Promise<void> {
+  const generation = ++imageGeneration;
+  capturedFrames = frames;
+  imageView.reset();
+  element('image-empty').hidden = false;
+  element('canvas-wrap').hidden = true;
+  element('channel-label').hidden = true;
+  element('image-waiting').textContent = 'No usable image was recovered in this session. Export session retains the radio recording and a report of what was captured.';
+  element('frame-count').textContent = record.framesDecoded.toLocaleString();
+  element('segment-count').textContent = record.imageSegments.toLocaleString();
+  element('image-height').textContent = '—';
+  setReceiverMode('meteor', true);
+  updateInstrument(record.input);
+  setReceiverState(record.errors.length ? 'error' : 'stopped', 'Saved session');
+  spectrum.reset('Saved session · spectrum is live-only; export raw data to inspect it');
+  if (!frames.byteLength) return;
+  const [{ PacketAssembler }, { MeteorImage }] = await Promise.all([
+    import('@meteor/decoder/packets'), import('@meteor/decoder/image'),
+  ]);
+  if (generation !== imageGeneration) return;
+  const packets = new PacketAssembler();
+  const image = new MeteorImage();
+  const bytes = new Uint8Array(frames);
+  for (let offset = 0; offset < bytes.length; offset += 1024)
+    for (const packet of packets.push(bytes.subarray(offset, offset + 1024))) image.push(packet);
+  const result = image.snapshot(record.image?.channel);
+  if (result) onReceiverEvent({ type: 'image', image: result });
+}
 function updateElapsed(): void {
   if (sessionStarted === null) return;
   const seconds = Math.floor((Date.now() - sessionStarted) / 1000);
@@ -555,6 +617,7 @@ function setReceiverMode(mode: 'meteor' | 'fm', force = false): void {
       button.setAttribute('aria-pressed', String(button.dataset.receiverMode === mode)),
     );
   element('satellite-output').hidden = radio;
+  element('capture-summary').hidden = radio;
   element('radio-output').hidden = !radio;
   element('meteor-start').hidden = radio;
   element('fm-start').hidden = !radio;
@@ -598,6 +661,7 @@ document
   });
 
 async function run(action: () => Promise<void>): Promise<void> {
+  if (receiver.running || capturePanel?.busy) return;
   receiverButtons(true);
   lastError = '';
   try {
@@ -610,8 +674,10 @@ async function run(action: () => Promise<void>): Promise<void> {
 }
 element('fm-start').onclick = () => void run(() => receiver.startRadio('fm'));
 element('meteor-start').onclick = () => void run(() => receiver.startRadio('meteor'));
-element('stop').onclick = () =>
-  void receiver.stop().catch((error) => toast(errorMessage(error)));
+element('stop').onclick = () => {
+  pendingAction++;
+  void receiver.stop('Stopped by user').catch((error) => toast(errorMessage(error)));
+};
 element<HTMLInputElement>('volume').oninput = (event) => {
   const volume = Number((event.target as HTMLInputElement).value);
   element('volume-value').textContent = `${volume}%`;
@@ -619,6 +685,8 @@ element<HTMLInputElement>('volume').oninput = (event) => {
 };
 element<HTMLSelectElement>('channel').onchange = (event) => {
   const channel = Number((event.target as HTMLSelectElement).value);
+  const generation = imageGeneration;
+  const captured = capturedFrames;
   if (receiver.running) receiver.channel(channel);
   else
     void Promise.all([
@@ -626,9 +694,10 @@ element<HTMLSelectElement>('channel').onchange = (event) => {
       import('@meteor/decoder/image'),
     ])
       .then(([{ PacketAssembler }, { MeteorImage }]) => {
+        if (generation !== imageGeneration) return;
         const packets = new PacketAssembler();
         const image = new MeteorImage();
-        const frames = new Uint8Array(capturedFrames);
+        const frames = new Uint8Array(captured);
         for (let offset = 0; offset < frames.length; offset += 1024) {
           for (const packet of packets.push(frames.subarray(offset, offset + 1024)))
             image.push(packet);
@@ -640,35 +709,33 @@ element<HTMLSelectElement>('channel').onchange = (event) => {
 };
 element('replay').onclick = () =>
   void run(async () => {
-    const data = new Uint8Array(await (await fetch(replayUrl)).arrayBuffer());
+    const action = ++pendingAction;
+    capturePanel?.configure('sample', 'Bundled Meteor test recording');
+    const response = await fetch(replayUrl);
+    if (!response.ok) throw new Error('The bundled sample could not be loaded.');
+    const data = await response.blob();
+    if (action !== pendingAction) return;
     await receiver.replay(data);
   });
 element<HTMLInputElement>('recording-file').onchange = (event) => {
   const file = (event.target as HTMLInputElement).files?.[0];
-  if (file && file.size > 128 * 1024 * 1024) {
-    toast('Choose a recording smaller than 128 MB.');
-    return;
-  }
-  if (file)
-    void run(async () =>
-      receiver.replay(
-        new Uint8Array(await file.arrayBuffer()),
-        element<HTMLSelectElement>('recording-kind').value as 'replay' | 'iq-file',
-      ),
-    );
+  if (!file) return;
+  const inferred = /\.cadu$/i.test(file.name) ? 'replay'
+    : /\.cu8$/i.test(file.name) ? 'iq-file'
+      : element<HTMLSelectElement>('recording-kind').value as 'replay' | 'iq-file';
+  element<HTMLSelectElement>('recording-kind').value = inferred;
+  capturePanel?.configure('imported', file.name);
+  void run(() => receiver.replay(file, inferred));
+  (event.target as HTMLInputElement).value = '';
 };
 element('save-image').onclick = () => {
-  if (captureInfo && imageView.channel !== null)
-    void saveObservation(
-      element<HTMLCanvasElement>('weather-image'),
-      capturedFrames,
-      captureInfo,
-      SUNRISE,
-      captureOrbits,
-      capturePlan,
-      imageView.channels,
-      imageView.channel,
-    ).catch((error) => toast(errorMessage(error)));
+  if (imageView.channel === null) return;
+  const source = capturePanel?.source ?? 'unknown';
+  const channel = imageView.channel;
+  element<HTMLCanvasElement>('weather-image').toBlob((blob) => {
+    if (blob) downloadBlob(blob, `meteor-${source}-channel-${channel}.png`);
+    else toast('Could not export the image. The session data is still available.');
+  }, 'image/png');
 };
 element('map-preview').onclick = () => {
   if (selected) selectWindow(selected);
@@ -857,7 +924,14 @@ document.addEventListener('visibilitychange', () => {
       'Reception stopped because the tab was hidden. Keep it visible during a pass.',
     );
     void receiver
-      .stop()
+      .stop('Tab hidden — keep the station visible during reception')
       .catch((error) => console.error('Stopping hidden receiver:', error));
+  }
+});
+
+window.addEventListener('beforeunload', (event) => {
+  if (receiver.running || capturePanel?.busy) {
+    event.preventDefault();
+    event.returnValue = '';
   }
 });

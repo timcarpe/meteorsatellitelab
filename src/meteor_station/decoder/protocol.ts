@@ -20,6 +20,7 @@ export type WorkerResponse =
       readonly carrierOffset: number;
       readonly processingMs: number;
     }
+  | { readonly type: 'frames'; readonly data: ArrayBuffer; readonly count: number; readonly segments: number; readonly gaps: number }
   | { readonly type: 'audio'; readonly data: Float32Array }
   | { readonly type: 'spectrum'; readonly data: Float32Array }
   | { readonly type: 'image'; readonly image: ImageSnapshot }

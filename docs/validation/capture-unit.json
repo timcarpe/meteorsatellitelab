@@ -1,0 +1,56 @@
+{
+  "environment": "Node 22; in-memory CaptureStore; no physical receiver",
+  "results": [
+    {
+      "name": "outcomes distinguish samples, frames and images without claiming a satellite signal",
+      "passed": true
+    },
+    {
+      "name": "raw bytes are copied before worker transfer and committed with correct counters",
+      "passed": true
+    },
+    {
+      "name": "sample replay cannot overwrite an earlier live attempt",
+      "passed": true
+    },
+    {
+      "name": "zero-sample session is saved and exportable without a fake PNG or frame file",
+      "passed": true
+    },
+    {
+      "name": "a no-image session exports all raw tuning runs and a measured report",
+      "passed": true
+    },
+    {
+      "name": "report-only export excludes raw bytes but records their saved size",
+      "passed": true
+    },
+    {
+      "name": "decoded frames and optional image survive finalization and export",
+      "passed": true
+    },
+    {
+      "name": "quota failure retains the committed prefix and clearly marks the session incomplete",
+      "passed": true
+    },
+    {
+      "name": "slow storage queue is bounded and reports failure instead of dropping samples",
+      "passed": true
+    },
+    {
+      "name": "export aborts rather than producing an apparently complete archive with a missing chunk",
+      "passed": true
+    },
+    {
+      "name": "repeated finalization joins the same promise",
+      "passed": true
+    },
+    {
+      "name": "imported radio files are not mislabelled as live or silently copied to raw storage",
+      "passed": true
+    }
+  ],
+  "dbname": "meteor-tests-3d1f8971-5ebd-41bb-a97a-e2a5bbc774d2",
+  "liveId": "dcb54132-baf6-4dba-8a05-3fd38bbeb693",
+  "rawBytes": 196608
+}

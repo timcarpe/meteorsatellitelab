@@ -19,7 +19,7 @@ export type ReceiverEvent =
   | { readonly type: 'status'; readonly message: string }
   | { readonly type: 'started'; readonly info: ReceiverInfo }
   | { readonly type: 'tuned'; readonly info: ReceiverInfo }
-  | { readonly type: 'stopped'; readonly frames: ArrayBuffer };
+  | { readonly type: 'stopped'; readonly frames: ArrayBuffer; readonly reason?: string };
 
 export class Receiver {
   private device: RtlDevice | null = null;
@@ -37,7 +37,10 @@ export class Receiver {
   private generation = 0;
   public info: ReceiverInfo | null = null;
 
-  public constructor(private readonly onEvent: (event: ReceiverEvent) => void) {}
+  public constructor(
+    private readonly onEvent: (event: ReceiverEvent) => void,
+    private readonly onRawSamples?: (data: ArrayBuffer, info: ReceiverInfo) => void,
+  ) {}
   public get running(): boolean {
     return (
       this.active || this.starting || this.stopping !== null || this.cleaning !== null
@@ -121,7 +124,7 @@ export class Receiver {
       this.timeout = setTimeout(
         () => {
           if (generation === this.generation)
-            void this.stop().catch((error) => this.report(error));
+            void this.stop('Time limit reached').catch((error) => this.report(error));
         },
         mode === 'fm' ? 60000 : 20 * 60000,
       );
@@ -145,18 +148,19 @@ export class Receiver {
   }
 
   public async replay(
-    data: Uint8Array,
+    data: Uint8Array | Blob,
     mode: 'replay' | 'iq-file' = 'replay',
     rate = 288000,
   ): Promise<void> {
     if (this.running) throw new StationError('Stop the current reception first.');
-    if (mode === 'replay' && data.length % 1024)
+    const length = data instanceof Blob ? data.size : data.length;
+    if (mode === 'replay' && length % 1024)
       throw new StationError(
         'This CADU file is incomplete; its size must be a multiple of 1024 bytes.',
       );
-    if (!data.length || data.length > 128 * 1024 * 1024)
-      throw new StationError('Choose a nonempty recording smaller than 128 MB.');
-    if (mode === 'iq-file' && data.length % 2)
+    if (!length || length > 768 * 1024 * 1024)
+      throw new StationError('Choose a nonempty recording smaller than 768 MiB.');
+    if (mode === 'iq-file' && length % 2)
       throw new StationError('The IQ file ends with an incomplete I/Q pair.');
     this.starting = true;
     const generation = ++this.generation;
@@ -179,17 +183,20 @@ export class Receiver {
       );
       for (
         let offset = 0;
-        offset < data.length && this.active && generation === this.generation;
+        offset < length && this.active && generation === this.generation;
         offset += 65536
       ) {
-        await session.send(data.slice(offset, offset + 65536).buffer);
+        const block = data instanceof Blob
+          ? await data.slice(offset, offset + 65536).arrayBuffer()
+          : data.slice(offset, offset + 65536).buffer;
+        if (!this.active || generation !== this.generation) break;
+        await session.send(block);
       }
-      if (generation === this.generation) await this.stop();
+      if (generation === this.generation) await this.stop('Recording playback complete');
     } catch (error) {
       if (generation !== this.generation) return;
-      await this.cleanup();
-      if (generation !== this.generation) return;
-      throw error;
+      this.onEvent({ type: 'error', message: errorMessage(error) });
+      await this.stop('Recording decode error');
     }
   }
 
@@ -199,7 +206,7 @@ export class Receiver {
   public channel(value: number): void {
     this.session?.channel(value);
   }
-  public stop(): Promise<void> {
+  public stop(reason = 'Stopped by user'): Promise<void> {
     if (this.stopping) return this.stopping;
     this.generation++;
     this.active = false;
@@ -222,7 +229,7 @@ export class Receiver {
       } finally {
         await this.cleanup();
         this.stopping = null;
-        this.onEvent({ type: 'stopped', frames });
+        this.onEvent({ type: 'stopped', frames, reason });
       }
     })();
     return this.stopping;
@@ -273,6 +280,7 @@ export class Receiver {
           throw new StationError(
             'The USB receiver returned an incomplete block. Reconnect the V3.',
           );
+        if (mode === 'meteor' && this.info) this.onRawSamples?.(block.data, this.info);
         const pending = session.send(block.data);
         inFlight.add(pending);
         void pending
@@ -287,6 +295,7 @@ export class Receiver {
         ) {
           await Promise.all(inFlight);
           if (!this.active || generation !== this.generation) break;
+          if (this.latestFrames > 0) continue;
           session.close();
           const frequency =
             (this.info?.frequency ?? 137900000) > 137500000 ? 137100000 : 137900000;
@@ -309,7 +318,7 @@ export class Receiver {
         console.error('Receiver:', error);
         this.onEvent({ type: 'error', message: errorMessage(error) });
         try {
-          await this.stop();
+          await this.stop('Receiver or recording error');
         } catch (stopError) {
           this.report(stopError);
         }
