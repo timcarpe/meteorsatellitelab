@@ -1,0 +1,41 @@
+/* Capture outcomes are normal workflow, not diagnostic instruments. */
+.capture-summary,
+.capture-history {
+  border: 1px solid var(--line, #d6ddd8);
+  background: var(--surface, #fff);
+  border-radius: 16px;
+  padding: 20px;
+}
+.capture-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+.capture-heading h2 { margin: 0; font-size: 18px; }
+#capture-source { font-size: 12px; font-weight: 600; }
+.capture-outcome { margin: 18px 0; }
+.capture-outcome strong { display: block; font-size: 20px; line-height: 1.3; }
+.capture-outcome p { margin: 8px 0 0; font-size: 14px; line-height: 1.55; }
+.capture-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 14px 0; border-block: 1px solid var(--line, #d6ddd8); }
+.capture-steps span { display: block; font-size: 12px; line-height: 1.4; }
+.capture-steps strong { display: block; margin-top: 6px; font-size: 19px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.capture-detail { font-size: 12px; line-height: 1.6; margin: 12px 0; }
+.capture-export { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.capture-export label { display: flex; gap: 8px; align-items: center; min-height: 44px; font-size: 13px; }
+.capture-error { border-left: 3px solid #a13c26; padding: 8px 12px; background: #fff2eb; font-size: 13px; line-height: 1.55; }
+.capture-summary[data-origin='sample'] { border: 2px dashed #99681b; }
+.capture-summary[data-origin='sample'] #capture-source { color: #7d510d; }
+.capture-history { margin-top: 24px; }
+.capture-history .section-heading { margin-bottom: 12px; }
+.capture-history .section-heading p { max-width: 70ch; line-height: 1.5; }
+.capture-history-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 0; border-top: 1px solid var(--line, #d6ddd8); }
+.capture-history-row strong { font-size: 14px; }
+.capture-history-row p { margin: 6px 0 0; font-size: 13px; line-height: 1.5; }
+.capture-history-actions { display: flex; gap: 8px; flex-shrink: 0; }
+#receiver-tools { margin: 20px 0; }
+#diagnostics { margin: 20px 0; }
+#diagnostics summary { cursor: pointer; padding: 14px 0; }
+#diagnostics p { max-width: 70ch; }
+@media (max-width: 700px) {
+  .capture-history-row { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .capture-history-actions { flex-wrap: wrap; }
+  .capture-summary, .capture-history { padding: 16px; }
+  .capture-steps { gap: 8px; }
+  .capture-outcome strong { font-size: 18px; }
+}

@@ -1,0 +1,14 @@
+{
+  "environment": "Chromium about:blank inline page. Production main.ts and capture modules; radio, decoder, planner and storage stand-ins. Not a native IndexedDB persistence or physical reception test.",
+  "passed": [
+    "sample hidden in diagnostics",
+    "radio samples without frames explicitly reported",
+    "zero-input outcome explicit",
+    "export enabled without image",
+    "sample creates separate history entry",
+    "old live attempt can be reviewed after sample with no sample image leakage",
+    "radio check leaves capture history intact",
+    "phone layout has no horizontal overflow"
+  ],
+  "pageErrors": []
+}

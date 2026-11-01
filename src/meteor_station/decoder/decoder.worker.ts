@@ -24,13 +24,26 @@ let selectedChannel: number | undefined;
 let serial: Promise<void> = Promise.resolve();
 
 function acceptFrames(frames: readonly Uint8Array[]): void {
-  for (const frame of frames) {
-    if (archive.length >= 16384)
-      throw new StationError(
-        'The 16 MB frame recording limit was reached. Save this reception.',
-      );
-    archive.push(frame);
-    for (const packet of packets.push(frame)) image.push(packet);
+  // Publish each accepted batch before it can be lost to a reset or worker failure.
+  const accepted: Uint8Array[] = [];
+  try {
+    for (const frame of frames) {
+      if (archive.length >= 16384)
+        throw new StationError('The 16 MiB frame limit was reached. Export this session.');
+      const before = packets.frames;
+      const complete = packets.push(frame);
+      if (packets.frames === before) continue; // Not a valid frame sync marker.
+      archive.push(frame);
+      accepted.push(frame);
+      for (const packet of complete) image.push(packet);
+    }
+  } finally {
+    if (accepted.length) {
+      const data = new Uint8Array(accepted.length * 1024);
+      accepted.forEach((frame, index) => data.set(frame, index * 1024));
+      port.postMessage({ type: 'frames', data: data.buffer, count: packets.frames,
+        segments: image.segments, gaps: packets.gaps }, [data.buffer]);
+    }
   }
 }
 
