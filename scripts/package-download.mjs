@@ -29,6 +29,8 @@ for (const path of [
   'THIRD_PARTY_NOTICES.txt',
   'package.json',
   'pnpm-lock.yaml',
+  'pnpm-workspace.yaml',
+  'patches',
   'tsconfig.json',
   'tsconfig.server.json',
   'vite.config.ts',

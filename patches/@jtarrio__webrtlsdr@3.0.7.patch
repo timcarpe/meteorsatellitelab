@@ -1,0 +1,16 @@
+diff --git a/dist/rtlsdr/rtl2832u.js b/dist/rtlsdr/rtl2832u.js
+index 653a61c3285c10a1bd0431a0beb389281a7e84b3..2a9e91a05e21d4cebebc743a86946d5b1beee380 100644
+--- a/dist/rtlsdr/rtl2832u.js
++++ b/dist/rtlsdr/rtl2832u.js
+@@ -172,7 +172,10 @@ export class RTL2832U {
+         this.sampleRate = rate;
+         let ratio = Math.floor((this._getXtalFrequency() * (1 << 22)) / rate);
+         ratio &= 0x0ffffffc;
+-        let realRate = Math.floor((this._getXtalFrequency() * (1 << 22)) / ratio);
++        // RTL2832U reconstructs bit 28 from bit 27 for its low-rate mode.
++        // Match librtlsdr's real_rsamp_ratio while preserving the register value.
++        const realRatio = ratio | ((ratio & 0x08000000) << 1);
++        let realRate = Math.floor((this._getXtalFrequency() * (1 << 22)) / realRatio);
+         // Demod Page 1, Regs 0x9f & 0xa1: Resample ratio [27:2] (RSAMP_RATIO)
+         // ratio = floor((xtal * 2^22) / rate) & 0x0ffffffc
+         await this.com.setDemodReg(1, 0x9f, (ratio >> 16) & 0xffff, 2);

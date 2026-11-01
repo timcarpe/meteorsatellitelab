@@ -69,6 +69,58 @@ export function overlapWindow(
     options,
   );
 }
+
+/** Join continuous availability before reserving setup and pack-away time. */
+export function schoolWindows(
+  pass: Pass,
+  day: string,
+  options: MatchOptions,
+  periods: readonly BellPeriod[] = BELL_PERIODS,
+): ReceptionWindow[] {
+  const eligible = periods
+    .filter(
+      (period) => period.kind === 'break' || options.allowedLessons.includes(period.id),
+    )
+    .map((period) => ({
+      period,
+      from: bellTimestamp(day, period.from),
+      until: bellTimestamp(day, period.until),
+    }))
+    .sort((a, b) => a.from - b.from || a.until - b.until);
+  const blocks: {
+    from: number;
+    until: number;
+    periods: typeof eligible;
+  }[] = [];
+  for (const period of eligible) {
+    const previous = blocks.at(-1);
+    if (previous && period.from <= previous.until) {
+      previous.until = Math.max(previous.until, period.until);
+      previous.periods.push(period);
+    } else {
+      blocks.push({ from: period.from, until: period.until, periods: [period] });
+    }
+  }
+  const windows: ReceptionWindow[] = [];
+  for (const block of blocks) {
+    const window = windowBetween(pass, block.from, block.until, '', 'lesson', options);
+    if (!window) continue;
+    // Name only periods actually needed, including setup and packing. A session
+    // wholly inside lunch remains a break even when adjacent lessons are enabled.
+    const used = block.periods.filter(
+      (period) => period.from < window.packedBy && period.until > window.setupAt,
+    );
+    windows.push(
+      Object.freeze({
+        ...window,
+        label: used.map(({ period }) => period.label).join(' + '),
+        kind: used.some(({ period }) => period.kind === 'lesson') ? 'lesson' : 'break',
+      }),
+    );
+  }
+  return windows;
+}
+
 /** The whole pass, still reserving setup time before it and pack-away time after. */
 export function anyTimeWindow(
   pass: Pass,
@@ -126,10 +178,7 @@ export function matchPasses(
     if (!options.anyTime && (weekday === 0 || weekday === 6)) continue;
     const candidates = options.anyTime
       ? [anyTimeWindow(pass, options)]
-      : BELL_PERIODS.filter(
-          (period) =>
-            period.kind === 'break' || options.allowedLessons.includes(period.id),
-        ).map((period) => overlapWindow(pass, period, day, options));
+      : schoolWindows(pass, day, options);
     for (const window of candidates) {
       if (!window) continue;
       const orbit = orbits.find((item) => item.norad === pass.norad)!;
@@ -155,4 +204,36 @@ export function matchPasses(
       b.usableMinutes - a.usableMinutes
     );
   });
+}
+
+/** Match a recalculated passage without relying on rounded rise-time IDs. */
+export function preserveReceptionWindow(
+  previous: ReceptionWindow | null,
+  windows: readonly ReceptionWindow[],
+): ReceptionWindow | null {
+  if (!previous) return null;
+  const overlap = (window: ReceptionWindow): number =>
+    Math.min(window.receiveUntil, previous.receiveUntil) -
+    Math.max(window.receiveFrom, previous.receiveFrom);
+  const sameAvailability = (window: ReceptionWindow): number =>
+    Number(window.kind === previous.kind && window.label === previous.label);
+  const timeChange = (window: ReceptionWindow): number =>
+    Math.abs(window.receiveFrom - previous.receiveFrom) +
+    Math.abs(window.receiveUntil - previous.receiveUntil);
+  return (
+    windows
+      .filter(
+        (window) =>
+          window.pass.norad === previous.pass.norad &&
+          window.pass.start < previous.pass.end &&
+          window.pass.end > previous.pass.start &&
+          overlap(window) > 0,
+      )
+      .sort(
+        (a, b) =>
+          sameAvailability(b) - sameAvailability(a) ||
+          overlap(b) - overlap(a) ||
+          timeChange(a) - timeChange(b),
+      )[0] ?? null
+  );
 }

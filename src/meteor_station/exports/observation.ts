@@ -16,6 +16,9 @@ export async function saveObservation(
   channels: readonly number[],
   selectedChannel: number,
 ): Promise<void> {
+  // A new reception may clear or resize the canvas while PNG encoding completes.
+  const width = canvas.width;
+  const height = canvas.height;
   const blob = await new Promise<Blob>((resolve, reject) =>
     canvas.toBlob(
       (value) =>
@@ -60,8 +63,8 @@ export async function saveObservation(
     plannedSatellite: info.mode === 'meteor' ? (plan?.pass.name ?? null) : null,
     plannedWindow: info.mode === 'meteor' ? plan : null,
     image: {
-      width: canvas.width,
-      height: canvas.height,
+      width,
+      height,
       channels,
       selectedChannel,
       processing: 'Unprojected MSU-MR grayscale; missing data is transparent or black',

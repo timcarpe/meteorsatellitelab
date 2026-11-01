@@ -1,5 +1,6 @@
 import { describe, expect, test, vi, beforeEach, afterEach } from 'vitest';
 import { Receiver, type ReceiverEvent } from '@meteor/radio/receiver';
+import type { WorkerResponse } from '@meteor/decoder/protocol';
 
 const fake = vi.hoisted(() => ({
   choose: vi.fn(),
@@ -7,6 +8,7 @@ const fake = vi.hoisted(() => ({
   send: vi.fn(),
   finish: vi.fn(),
   close: vi.fn(),
+  workers: [] as ((event: WorkerResponse) => void)[],
   device: {
     setDirectSamplingMethod: vi.fn(),
     enableBiasTee: vi.fn(),
@@ -26,6 +28,9 @@ vi.mock('@jtarrio/webrtlsdr/rtlsdr.js', () => ({
 }));
 vi.mock('@meteor/radio/worker-session', () => ({
   WorkerSession: class {
+    constructor(onEvent: (event: WorkerResponse) => void) {
+      fake.workers.push(onEvent);
+    }
     queued = 0;
     start = fake.start;
     send = fake.send;
@@ -36,6 +41,7 @@ vi.mock('@meteor/radio/worker-session', () => ({
 }));
 beforeEach(() => {
   vi.resetAllMocks();
+  fake.workers.length = 0;
   vi.stubGlobal('isSecureContext', true);
   vi.stubGlobal('navigator', { usb: {} });
   fake.choose.mockResolvedValue(fake.device);
@@ -53,21 +59,36 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function mockAudio() {
+  const close = vi.fn().mockResolvedValue(undefined);
+  const gain = { gain: { value: 0 }, connect: vi.fn() };
+  vi.stubGlobal(
+    'AudioContext',
+    class {
+      destination = {};
+      createGain = () => gain;
+      resume = vi.fn();
+      close = close;
+    },
+  );
+  return { close, gain };
+}
+
 describe('Receiver lifecycle', () => {
   test('tunes the radio check to 96.5 MHz and stops audio after 60 seconds', async () => {
     // Arrange
     vi.useFakeTimers();
-    const closeAudio = vi.fn().mockResolvedValue(undefined);
-    const gain = { gain: { value: 0 }, connect: vi.fn() };
-    vi.stubGlobal(
-      'AudioContext',
-      class {
-        destination = {};
-        createGain = () => gain;
-        resume = vi.fn();
-        close = closeAudio;
-      },
-    );
+    const { close: closeAudio, gain } = mockAudio();
     const receiver = new Receiver(() => {});
     // Act
     await receiver.startRadio('fm');
@@ -108,10 +129,118 @@ describe('Receiver lifecycle', () => {
     await receiver.stop();
     choose(fake.device);
     // Assert
-    await expect(starting).rejects.toThrow('cancelled');
+    await expect(starting).resolves.toBeUndefined();
     expect(fake.device.close).toHaveBeenCalledOnce();
     expect(fake.device.setSampleRate).not.toHaveBeenCalled();
     expect(receiver.running).toBe(false);
+  });
+  test('stays stopped when a cancelled buffer reset completes, and can restart', async () => {
+    const entered = deferred<void>();
+    const reset = deferred<void>();
+    fake.device.resetBuffer.mockImplementationOnce(() => {
+      entered.resolve();
+      return reset.promise;
+    });
+    const events: ReceiverEvent[] = [];
+    const receiver = new Receiver((event) => events.push(event));
+    const starting = receiver.startRadio('meteor');
+    await entered.promise;
+
+    await receiver.stop();
+    reset.resolve();
+    await starting;
+
+    expect(receiver.running).toBe(false);
+    expect(events.some((event) => event.type === 'started')).toBe(false);
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+    await receiver.startRadio('meteor');
+    expect(receiver.running).toBe(true);
+    await receiver.stop();
+  });
+  test('a cancelled FM setup cannot retune its replacement Meteor session', async () => {
+    mockAudio();
+    const entered = deferred<void>();
+    const gain = deferred<void>();
+    fake.device.setGain.mockImplementationOnce(() => {
+      entered.resolve();
+      return gain.promise;
+    });
+    const replacement = {
+      ...fake.device,
+      setGain: vi.fn().mockResolvedValue(undefined),
+      setSampleRate: vi.fn().mockResolvedValue(288000),
+      setCenterFrequency: vi.fn(async (frequency: number) => frequency),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    fake.choose.mockResolvedValueOnce(fake.device).mockResolvedValueOnce(replacement);
+    const events: ReceiverEvent[] = [];
+    const receiver = new Receiver((event) => events.push(event));
+    const starting = receiver.startRadio('fm');
+    await entered.promise;
+
+    await receiver.stop();
+    await receiver.startRadio('meteor');
+    gain.resolve();
+    await starting;
+
+    expect(fake.device.setCenterFrequency).not.toHaveBeenCalled();
+    expect(replacement.setCenterFrequency.mock.calls).toEqual([[137900000]]);
+    expect(receiver.info).toMatchObject({ mode: 'meteor', frequency: 137900000 });
+    expect(receiver.running).toBe(true);
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+    await receiver.stop();
+  });
+  test('releases a late wake lock without replacing the current session lock', async () => {
+    const entered = deferred<void>();
+    const oldLock = { release: vi.fn().mockResolvedValue(undefined) };
+    const currentLock = { release: vi.fn().mockResolvedValue(undefined) };
+    const request = deferred<typeof oldLock>();
+    vi.stubGlobal('navigator', {
+      usb: {},
+      wakeLock: {
+        request: vi
+          .fn()
+          .mockImplementationOnce(() => {
+            entered.resolve();
+            return request.promise;
+          })
+          .mockResolvedValue(currentLock),
+      },
+    });
+    const receiver = new Receiver(() => {});
+    const starting = receiver.startRadio('meteor');
+    await entered.promise;
+
+    await receiver.stop();
+    await receiver.startRadio('meteor');
+    request.resolve(oldLock);
+    await starting;
+
+    expect(oldLock.release).toHaveBeenCalledOnce();
+    expect(currentLock.release).not.toHaveBeenCalled();
+    expect(receiver.running).toBe(true);
+    await receiver.stop();
+    expect(currentLock.release).toHaveBeenCalledOnce();
+  });
+  test('ignores a late USB failure and worker messages from a stopped session', async () => {
+    const read = deferred<{ data: ArrayBuffer }>();
+    fake.device.readSamples.mockReturnValueOnce(read.promise);
+    const events: ReceiverEvent[] = [];
+    const receiver = new Receiver((event) => events.push(event));
+    await receiver.startRadio('meteor');
+    const oldWorker = fake.workers[0]!;
+    await receiver.stop();
+    await receiver.startRadio('meteor');
+
+    oldWorker({ type: 'error', message: 'Old worker failed' });
+    read.reject(new Error('Old USB read failed'));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+    expect(fake.device.close).toHaveBeenCalledOnce();
+    expect(receiver.running).toBe(true);
+    await receiver.stop();
   });
   test('cleans up after setup failure and allows a new session', async () => {
     // Arrange
