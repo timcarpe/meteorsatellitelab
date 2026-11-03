@@ -297,4 +297,39 @@ describe('Receiver lifecycle', () => {
       info: { frequency: 137100025, mode: 'meteor' },
     });
   });
+  test('stays on a Meteor channel that shows an LRPT-shaped signal', async () => {
+    // Arrange: a spectrum with a +3 dB hump across the LRPT band.
+    vi.useFakeTimers();
+    let deliver!: (block: { data: ArrayBuffer }) => void;
+    fake.device.readSamples.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          deliver = resolve;
+        }),
+    );
+    const hump = () =>
+      Float32Array.from({ length: 512 }, (_, i) =>
+        Math.abs((i - 256) * 562.5) < 50000 ? -57 : -60,
+      );
+    const events: ReceiverEvent[] = [];
+    const receiver = new Receiver((event) => events.push(event));
+    // Act: the signal persists past the 45 s point where an empty channel is left.
+    await receiver.startRadio('meteor');
+    for (let second = 0; second < 50; second++) {
+      fake.workers[0]!({ type: 'spectrum', data: hump() });
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    deliver({ data: new ArrayBuffer(65536) });
+    await vi.advanceTimersByTimeAsync(10);
+    await receiver.stop();
+    // Assert
+    expect(events.some((event) => event.type === 'tuned')).toBe(false);
+    expect(fake.device.setCenterFrequency).toHaveBeenCalledTimes(1);
+    expect(
+      events.some(
+        (event) =>
+          event.type === 'status' && /shaped like Meteor LRPT/.test(event.message),
+      ),
+    ).toBe(true);
+  });
 });
