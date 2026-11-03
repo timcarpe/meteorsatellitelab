@@ -5,6 +5,7 @@ import {
   type RtlDevice,
 } from '@jtarrio/webrtlsdr/rtlsdr.js';
 import { WorkerSession } from '@meteor/radio/worker-session';
+import { ChannelWatch } from '@meteor/radio/channel-watch';
 import type { Mode, WorkerResponse } from '@meteor/decoder/protocol';
 import { StationError, errorMessage } from '@meteor/core/errors';
 
@@ -34,6 +35,7 @@ export class Receiver {
   private nextAudio = 0;
   private timeout: ReturnType<typeof setTimeout> | null = null;
   private latestFrames = 0;
+  private readonly watch = new ChannelWatch();
   private generation = 0;
   public info: ReceiverInfo | null = null;
 
@@ -249,6 +251,14 @@ export class Receiver {
         return;
       if (event.type === 'ack') this.latestFrames = event.frames;
       if (event.type === 'audio') this.playAudio(event.data);
+      if (
+        event.type === 'spectrum' &&
+        mode === 'meteor' &&
+        this.watch.addSpectrum(event.data, rate, Date.now())
+      )
+        this.status(
+          `Signal shaped like Meteor LRPT on ${((this.info?.frequency ?? 0) / 1e6).toFixed(3)} MHz. Staying on this channel while it lasts.`,
+        );
       this.onEvent(event);
     });
     this.session = session;
@@ -259,7 +269,7 @@ export class Receiver {
   private async readLoop(mode: 'meteor' | 'fm', generation: number): Promise<void> {
     const inFlight = new Set<Promise<void>>();
     let failure: Error | null = null;
-    let tunedAt = Date.now();
+    this.watch.reset(Date.now());
     try {
       while (
         this.active &&
@@ -288,14 +298,12 @@ export class Receiver {
             failure = error;
           })
           .finally(() => inFlight.delete(pending));
-        if (
-          mode === 'meteor' &&
-          this.latestFrames === 0 &&
-          Date.now() - tunedAt > 45000
-        ) {
+        // Stay while frames decode or an LRPT-shaped signal is present; otherwise try
+        // Meteor's other channel. Retuning restarts the decoder for the new stream.
+        if (mode === 'meteor' && this.watch.shouldHop(Date.now(), this.latestFrames)) {
           await Promise.all(inFlight);
           if (!this.active || generation !== this.generation) break;
-          if (this.latestFrames > 0) continue;
+          if (!this.watch.shouldHop(Date.now(), this.latestFrames)) continue;
           session.close();
           const frequency =
             (this.info?.frequency ?? 137900000) > 137500000 ? 137100000 : 137900000;
@@ -310,7 +318,7 @@ export class Receiver {
           if (!this.active || generation !== this.generation) break;
           this.info = { ...this.info!, frequency: tuned };
           this.onEvent({ type: 'tuned', info: this.info });
-          tunedAt = Date.now();
+          this.watch.reset(Date.now());
         }
       }
     } catch (error) {

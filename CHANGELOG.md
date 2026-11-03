@@ -44,6 +44,11 @@ All notable changes follow Keep a Changelog.
   a dash labelled “Unknown”.
 
 ### Fixed
+- Satellite reception no longer leaves a channel every 45 seconds while it shows
+  an LRPT-shaped signal: it stays while the in-band power (3–25 kHz) is at least
+  0.6 dB above the 70–100 kHz guard bands, and moves on 30 seconds after it fades.
+  Narrow interference lines do not count. Tuned against a field capture where
+  alternating channels split a 76° Meteor M2-4 pass in half.
 - Corrected the pinned Web RTL-SDR dependency's low-rate calculation: the requested
   288 kS/s no longer reaches the FM and Meteor decoders as an incorrect 800 kS/s.
 - Cancelling receiver startup cannot revive a stopped session or let delayed
