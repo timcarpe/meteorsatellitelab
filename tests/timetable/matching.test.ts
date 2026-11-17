@@ -60,7 +60,7 @@ describe('School availability', () => {
       overlapWindow({ ...pass, end: time('09:52') }, period, day, DEFAULT_MATCH),
     ).toBeNull();
     expect(
-      overlapWindow(pass, period, day, { ...DEFAULT_MATCH, notBefore: time('09:51') }),
+      overlapWindow(pass, period, day, { ...DEFAULT_MATCH, notBefore: time('09:55') }),
     ).toBeNull();
     expect(() =>
       overlapWindow(pass, period, day, { ...DEFAULT_MATCH, setupMinutes: -1 }),
@@ -121,7 +121,36 @@ describe('School availability', () => {
     expect(window.receiveUntil).toBe(night.end);
     expect(window.packedBy).toBe(time('22:25'));
     expect(window.completePass).toBe(true);
-    expect(started.receiveFrom).toBe(time('22:17'));
+    expect(window.setupLate).toBe(false);
+    expect(started.receiveFrom).toBe(time('22:12'));
+    expect(started.setupLate).toBe(true);
+  });
+  test('keeps a pass that is already up, from now, instead of dropping it', () => {
+    // Arrange: during the morning break, after the pass has risen. Waiting for the
+    // full setup time from now would leave too little of it to be worth listing.
+    const period = BELL_PERIODS.find((value) => value.id === 'break1')!;
+    // Act
+    const window = overlapWindow(pass, period, day, {
+      ...DEFAULT_MATCH,
+      notBefore: time('09:51'),
+    })!;
+    // Assert
+    expect(window.receiveFrom).toBe(time('09:51'));
+    expect(window.receiveUntil).toBe(time('09:57'));
+    expect(window.setupLate).toBe(true);
+    expect(window.completePass).toBe(false);
+  });
+  test('does not mark a pass late when setup fits before it rises', () => {
+    // Arrange
+    const period = BELL_PERIODS.find((value) => value.id === 'break1')!;
+    // Act
+    const window = overlapWindow(pass, period, day, {
+      ...DEFAULT_MATCH,
+      notBefore: time('09:40'),
+    })!;
+    // Assert: setup still waits for the break to start.
+    expect(window.setupAt).toBe(time('09:45'));
+    expect(window.setupLate).toBe(false);
   });
   test('any-time mode includes nights and weekends but honours excluded dates', () => {
     // Arrange

@@ -139,9 +139,14 @@ function windowBetween(
   requireFinite(options.setupMinutes, 'Setup minutes', 0, 30);
   requireFinite(options.packMinutes, 'Pack-away minutes', 0, 30);
   requireFinite(options.minimumMinutes, 'Minimum reception', 1, 20);
+  const setup = options.setupMinutes * 60000;
+  // Setup cannot start before free time does. "Now" is different: a pass that is
+  // already up, or rises before setup could finish, is still worth receiving, so it
+  // is offered from now and marked late instead of disappearing from the plan.
   const receiveFrom = Math.max(
     pass.start,
-    Math.max(from, options.notBefore ?? from) + options.setupMinutes * 60000,
+    from + setup,
+    options.notBefore ?? -Infinity,
   );
   const receiveUntil = Math.min(pass.end, until - options.packMinutes * 60000);
   const usableMinutes = (receiveUntil - receiveFrom) / 60000;
@@ -150,7 +155,9 @@ function windowBetween(
     pass,
     label,
     kind,
-    setupAt: receiveFrom - options.setupMinutes * 60000,
+    setupAt: receiveFrom - setup,
+    setupLate:
+      options.notBefore !== undefined && receiveFrom - setup < options.notBefore,
     receiveFrom,
     receiveUntil,
     packedBy: receiveUntil + options.packMinutes * 60000,

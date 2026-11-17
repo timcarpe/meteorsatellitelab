@@ -57,4 +57,6 @@ export interface ReceptionWindow {
   readonly usableMinutes: number;
   readonly maxElevation: number;
   readonly completePass: boolean;
+  /** Setup time has already passed: the pass is up or rises within the setup time. */
+  readonly setupLate?: boolean;
 }

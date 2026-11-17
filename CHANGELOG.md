@@ -23,6 +23,11 @@ All notable changes follow Keep a Changelog.
 - The planner states its rolling seven-day horizon and end date, and long lists
   show “Showing 12 of N windows” with Show all / Show fewer.
 
+- Live satellite position on the Receive page: a sky plot of the selected pass with
+  the satellite's current elevation, direction, Doppler shift at 137.9 MHz and
+  countdowns to rise, peak and set, so students need not leave the page (hiding
+  the tab stops reception).
+
 ### Changed
 - Simplified the interface with compact Material-style controls and concise copy.
 - Added a default Sunrise regional map and a Global toggle, preserving pass previews.
@@ -44,6 +49,10 @@ All notable changes follow Keep a Changelog.
   a dash labelled “Unknown”.
 
 ### Fixed
+- A pass already overhead, or rising within the 5-minute setup time, stays in the
+  plan from now, marked "Now" with a set-up-now note, instead of disappearing.
+  Predictions start 30 minutes back so an in-progress pass keeps its real rise
+  time, peak and identity.
 - Satellite reception no longer leaves a channel every 45 seconds while it shows
   an LRPT-shaped signal: it stays while the in-band power (3–25 kHz) is at least
   0.6 dB above the 70–100 kHz guard bands, and moves on 30 seconds after it fades.
