@@ -24,6 +24,8 @@ import {
   preserveReceptionWindow,
 } from '@meteor/timetable/matching';
 import { EarthMap, type MapView } from '@meteor/map/earth';
+import { SkyPlot } from '@meteor/map/sky';
+import { countdown, dopplerHz, passPhase, passTrack } from '@meteor/orbit/tracking';
 import {
   Receiver,
   type ReceiverEvent,
@@ -42,6 +44,8 @@ const refreshIcon =
 /** Rolling prediction horizon and the number of windows listed before "Show all". */
 const PLAN_DAYS = 7;
 const LIST_LIMIT = 12;
+/** Predict from slightly in the past so a pass already overhead keeps its real rise. */
+const PASS_LOOKBACK_MS = 30 * 60000;
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
   <header class="site-header">
@@ -114,6 +118,20 @@ app.innerHTML = `
           </section>
         </article>
         <div class="output-stack">
+          <article class="track-card" id="track-card" aria-labelledby="track-title">
+            <div class="card-header"><h2 id="track-title">Satellite position</h2><span id="track-phase" class="track-phase">Select a pass in Plan</span></div>
+            <div class="track-body">
+              <div id="sky-plot" class="sky-plot"></div>
+              <dl class="track-facts">
+                <div><dt>Satellite</dt><dd id="track-name">—</dd></div>
+                <div><dt>Elevation</dt><dd id="track-elevation">—</dd></div>
+                <div><dt>Direction</dt><dd id="track-azimuth">—</dd></div>
+                <div><dt>Peak</dt><dd id="track-peak">—</dd></div>
+                <div><dt title="Frequency shift at 137.9 MHz from the satellite's motion">Doppler</dt><dd id="track-doppler">—</dd></div>
+              </dl>
+            </div>
+            <p class="fine-print track-note">Calculated live on this computer from the orbit data. Stay on this page during the pass: hiding the tab stops reception.</p>
+          </article>
           <article class="image-card" id="satellite-output">
             <div class="card-header"><h2>Weather image</h2><span id="image-source">No data</span></div>
             <div id="image-empty" class="image-empty"><div class="image-empty-art" aria-hidden="true"><svg viewBox="0 0 100 66" fill="none"><rect x="8" y="5" width="84" height="56" rx="5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 4"/><path d="M9 25h82M9 43h82" stroke="currentColor" opacity=".4"/><path d="M28 47l15-15 11 10 12-16 14 21" stroke="currentColor" stroke-width="1.5" opacity=".75"/><circle cx="32" cy="21" r="5" stroke="currentColor" stroke-width="1.5"/></svg></div><h3 id="image-empty-heading">Image builds automatically</h3><p id="image-waiting">Meteor image packets will appear here as they are decoded. You can export a session even if no image is recovered.</p><span class="image-empty-note">No extra processing button is needed</span></div>
@@ -196,6 +214,8 @@ try {
   /* Defaults remain available when local storage is unavailable. */
 }
 const map = new EarthMap(element('earth-map'));
+const sky = new SkyPlot(element('sky-plot'));
+let trackedPassId: string | null = null;
 const spectrum = new SpectrumView(element<HTMLCanvasElement>('signal-plot'));
 let spectrumHasSamples = false;
 function clearSpectrumReadout(state: string): void {
@@ -297,8 +317,8 @@ function selectWindow(window: ReceptionWindow, preview = true): void {
     <p class="window-date">${dayText(window.receiveFrom)} · ${window.label}</p>
     <p class="window-time">${timeText(window.receiveFrom)}–${timeText(window.receiveUntil)}</p>
     <dl class="pass-facts"><div><dt>Satellite</dt><dd>${window.pass.name.replace('Meteor ', '')}</dd></div><div><dt>Height</dt><dd>${Math.round(window.maxElevation)}°</dd></div><div><dt>Usable</dt><dd>${Math.floor(window.usableMinutes)} min</dd></div><div><dt>Path</dt><dd>${direction}</dd></div></dl>
-    <ol class="session-times"><li><span>Set up</span><strong>${timeText(window.setupAt)}</strong></li><li><span>Receive</span><strong>${timeText(window.receiveFrom)}</strong></li><li><span>Pack away by</span><strong>${timeText(window.packedBy)}</strong></li></ol>
-    ${window.completePass ? '' : '<p class="window-note">Partial pass: reception is limited by your availability.</p>'}
+    <ol class="session-times"><li><span>Set up</span><strong>${window.setupLate ? 'Now' : timeText(window.setupAt)}</strong></li><li><span>Receive</span><strong>${timeText(window.receiveFrom)}</strong></li><li><span>Pack away by</span><strong>${timeText(window.packedBy)}</strong></li></ol>
+    ${window.setupLate ? `<p class="window-note late">${Date.now() >= window.pass.start ? 'This pass is already up.' : 'This pass rises before the usual 5-minute setup.'} Start reception now if your antenna is ready.</p>` : window.completePass ? '' : '<p class="window-note">Partial pass: reception is limited by your availability.</p>'}
     <button class="button primary full" id="prepare">Prepare receiver</button><button class="button text" id="calendar">Add to calendar</button>`;
   element('prepare').onclick = () => {
     setReceiverMode('meteor');
@@ -306,7 +326,7 @@ function selectWindow(window: ReceptionWindow, preview = true): void {
   };
   element('calendar').onclick = () => exportCalendar(window);
   element('antenna-plan').textContent =
-    `${dayText(window.receiveFrom)} · Set up ${timeText(window.setupAt)} · Receive ${timeText(window.receiveFrom)}–${timeText(window.receiveUntil)} · ${direction}`;
+    `${dayText(window.receiveFrom)} · Set up ${window.setupLate ? 'now' : timeText(window.setupAt)} · Receive ${timeText(window.receiveFrom)}–${timeText(window.receiveUntil)} · ${direction}`;
   document
     .querySelectorAll('[data-pass]')
     .forEach((row) =>
@@ -316,6 +336,60 @@ function selectWindow(window: ReceptionWindow, preview = true): void {
       ),
     );
   updateMap();
+  updateTracking();
+}
+
+/** Live position of the selected pass's satellite, for the Receive page. */
+function updateTracking(): void {
+  const pass = selected?.pass ?? null;
+  const orbit = pass && orbits.find((item) => item.norad === pass.norad);
+  if (!pass || !orbit) {
+    trackedPassId = null;
+    sky.setTrack([], null);
+    sky.setPosition(null);
+    element('track-phase').textContent = 'Select a pass in Plan';
+    for (const id of ['track-name', 'track-elevation', 'track-azimuth', 'track-peak', 'track-doppler'])
+      element(id).textContent = '—';
+    return;
+  }
+  const now = Date.now();
+  try {
+    if (trackedPassId !== pass.id) {
+      trackedPassId = pass.id;
+      const peak = positionAt(orbit, pass.peak, SUNRISE);
+      sky.setTrack(passTrack(orbit, SUNRISE, pass), {
+        time: pass.peak,
+        azimuth: peak.azimuth,
+        elevation: peak.elevation,
+      });
+      element('track-name').textContent = pass.name.replace('Meteor ', '');
+      element('track-peak').textContent =
+        `${Math.round(pass.maxElevation)}° at ${timeText(pass.peak)}`;
+    }
+    const position = positionAt(orbit, now, SUNRISE);
+    sky.setPosition({ time: now, azimuth: position.azimuth, elevation: position.elevation });
+    const phase = passPhase(pass, now);
+    element('track-card').dataset.phase = phase.phase;
+    element('track-phase').textContent =
+      phase.phase === 'before'
+        ? `Rises in ${countdown(phase.untilRise)}`
+        : phase.phase === 'up'
+          ? phase.untilPeak > 0
+            ? `Up now · peak in ${countdown(phase.untilPeak)}`
+            : `Up now · sets in ${countdown(phase.untilSet)}`
+          : `Set ${countdown(phase.sinceSet)} ago · choose the next pass in Plan`;
+    element('track-elevation').textContent =
+      position.elevation >= 0
+        ? `${position.elevation.toFixed(0)}°`
+        : `Below horizon (${position.elevation.toFixed(0)}°)`;
+    element('track-azimuth').textContent =
+      `${compass(position.azimuth)} · ${position.azimuth.toFixed(0)}°`;
+    const doppler = dopplerHz(orbit, SUNRISE, now, 137.9e6);
+    element('track-doppler').textContent =
+      phase.phase === 'up' ? `${doppler >= 0 ? '+' : '−'}${Math.abs(doppler / 1000).toFixed(1)} kHz` : '—';
+  } catch (error) {
+    element('track-phase').textContent = errorMessage(error);
+  }
 }
 
 function rebuildPlan(): void {
@@ -331,7 +405,9 @@ function rebuildPlan(): void {
   const predicting = age <= 14 && age >= -1;
   const horizon = now + PLAN_DAYS * 86400000;
   const passes = predicting
-    ? orbits.flatMap((orbit) => predictPasses(orbit, SUNRISE, now, horizon))
+    ? orbits.flatMap((orbit) =>
+        predictPasses(orbit, SUNRISE, now - PASS_LOOKBACK_MS, horizon),
+      )
     : [];
   windows = matchPasses(passes, orbits, SUNRISE, {
     ...DEFAULT_MATCH,
@@ -350,7 +426,7 @@ function rebuildPlan(): void {
       listed
         .map(
           (window, index) =>
-            `<button class="pass-row" data-pass="${window.pass.id}" data-index="${index}" aria-label="Choose ${window.pass.name}, ${dayText(window.receiveFrom)}, ${timeText(window.receiveFrom)}"><span>${dayText(window.receiveFrom)}</span><strong>${timeText(window.receiveFrom)} – ${timeText(window.receiveUntil)}</strong><span><i class="window-dot ${window.kind}"></i>${window.label}</span><span>${window.pass.name}</span><span class="height-label">${Math.round(window.maxElevation)}°</span><span class="row-arrow" aria-hidden="true">›</span></button>`,
+            `<button class="pass-row" data-pass="${window.pass.id}" data-index="${index}" aria-label="Choose ${window.pass.name}, ${dayText(window.receiveFrom)}, ${timeText(window.receiveFrom)}"><span>${dayText(window.receiveFrom)}</span><strong>${timeText(window.receiveFrom)} – ${timeText(window.receiveUntil)}</strong><span><i class="window-dot ${window.kind}"></i>${window.label}${window.setupLate ? ' <em class="now-tag">Now</em>' : ''}</span><span>${window.pass.name}</span><span class="height-label">${Math.round(window.maxElevation)}°</span><span class="row-arrow" aria-hidden="true">›</span></button>`,
         )
         .join('') +
       listFooter
@@ -664,6 +740,7 @@ function setReceiverMode(mode: 'meteor' | 'fm', force = false): void {
       button.setAttribute('aria-pressed', String(button.dataset.receiverMode === mode)),
     );
   element('satellite-output').hidden = radio;
+  element('track-card').hidden = radio;
   element('capture-summary').hidden = radio;
   element('radio-output').hidden = !radio;
   element('meteor-start').hidden = radio;
@@ -943,6 +1020,7 @@ if (!Receiver.supported) {
 if (location.protocol === 'file:') element('download-app').hidden = true;
 function clock(): void {
   updateElapsed();
+  if (!element('receive-page').hidden) updateTracking();
   element('school-clock').textContent =
     `${dayText(Date.now())} · ${timeText(Date.now())}`;
 }

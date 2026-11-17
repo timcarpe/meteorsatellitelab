@@ -358,6 +358,7 @@ main {
 .receiver-card,
 .image-card,
 .radio-card,
+.track-card,
 .pass-list {
   min-width: 0;
   overflow: hidden;
@@ -676,6 +677,22 @@ main {
 .window-note {
   font-size: 14px;
   color: var(--muted);
+}
+.window-note.late {
+  padding: 10px 12px;
+  border-radius: var(--radius-s);
+  background: var(--warning-container);
+  color: var(--on-warning);
+}
+.now-tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--warning-container);
+  color: var(--on-warning);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 600;
 }
 .window-card .button.primary {
   min-height: 48px;
@@ -1042,7 +1059,102 @@ meter::-moz-meter-bar {
   font-weight: 500;
 }
 .output-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
   min-width: 0;
+}
+.track-phase {
+  font-variant-numeric: tabular-nums;
+}
+.track-card[data-phase='up'] .track-phase {
+  color: var(--primary);
+  font-weight: 600;
+}
+.track-body {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) 1fr;
+  align-items: center;
+  gap: 20px;
+  padding: 16px 24px 4px;
+}
+.sky-svg {
+  width: 100%;
+  height: auto;
+}
+.sky-horizon {
+  fill: var(--surface-dim);
+  stroke: var(--outline);
+}
+.sky-ring {
+  fill: none;
+  stroke: var(--line);
+}
+.sky-label,
+.sky-ring-label {
+  fill: var(--muted);
+  font-size: 11px;
+}
+.sky-label {
+  font-weight: 600;
+}
+.sky-track,
+.sky-track-past {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.sky-track {
+  stroke: var(--outline);
+  stroke-width: 2;
+  stroke-dasharray: 4 4;
+}
+.sky-track-past {
+  stroke: var(--primary);
+  stroke-width: 3;
+}
+.sky-rise {
+  fill: var(--surface);
+  stroke: var(--primary);
+  stroke-width: 2;
+}
+.sky-set {
+  stroke: var(--muted);
+  stroke-width: 2;
+}
+.sky-peak {
+  fill: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+.sky-now-halo {
+  fill: var(--primary);
+  fill-opacity: 0.18;
+}
+.sky-now-dot {
+  fill: var(--primary);
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+.track-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+  margin: 0;
+}
+.track-facts dt {
+  font-size: 13px;
+  color: var(--muted);
+}
+.track-facts dd {
+  margin: 2px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.track-note {
+  margin: 0;
+  padding: 8px 24px 16px;
 }
 .image-empty {
   display: flex;
@@ -1571,6 +1683,17 @@ label.day-row:has(:focus-visible) {
   }
 }
 @media (max-width: 560px) {
+  .track-body {
+    grid-template-columns: 1fr;
+    padding: 12px 16px 4px;
+  }
+  .sky-plot {
+    max-width: 240px;
+    margin: 0 auto;
+  }
+  .track-note {
+    padding: 8px 16px 16px;
+  }
   .site-header {
     flex-wrap: wrap;
     gap: 0 12px;
