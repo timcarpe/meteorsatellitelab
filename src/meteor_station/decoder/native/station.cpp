@@ -10,6 +10,7 @@ extern "C" {
 #include "vendor/libcorrect/include/correct.h"
 int radio_init(int sample_rate);
 int radio_demod(const uint8_t *iq, int bytes, uint8_t *soft);
+int radio_reset_timing(void);
 float radio_carrier_offset(void);
 }
 
@@ -24,6 +25,10 @@ std::array<uint8_t, MAX_FRAMES * 1024> frames{};
 int frame_count = 0;
 bool overflow = false;
 int last_symbols = 0;
+// Soft bytes (two per symbol) without a decoded frame before symbol timing restarts.
+// Timing that drifted in noise is re-acquired instead of persisting into the pass.
+constexpr long REACQUIRE_SOFT_BYTES = 72000L * 2 * 20;
+long soft_since_frame = 0;
 
 int feed(const uint8_t *data, size_t length, bool finish = false) {
     if (!decoder || length > MAX_INPUT) return -1;
@@ -56,7 +61,14 @@ int station_iq(const uint8_t *data, int length) {
     if (length <= 0 || length > static_cast<int>(MAX_INPUT) || length % 2) return -1;
     const int count = radio_demod(data, length, symbols.data());
     last_symbols = count;
-    return count < 0 ? count : feed(symbols.data(), count);
+    if (count < 0) return count;
+    const int result = feed(symbols.data(), count);
+    soft_since_frame = result > 0 ? 0 : soft_since_frame + count;
+    if (soft_since_frame >= REACQUIRE_SOFT_BYTES) {
+        radio_reset_timing();
+        soft_since_frame = 0;
+    }
+    return result;
 }
 int station_soft(const uint8_t *data, int length) {
     if (length <= 0 || length > static_cast<int>(MAX_INPUT)) return -1;

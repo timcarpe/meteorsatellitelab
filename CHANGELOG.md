@@ -49,6 +49,12 @@ All notable changes follow Keep a Changelog.
   a dash labelled “Unknown”.
 
 ### Fixed
+- The Meteor decoder no longer stays blind after a noisy start to a pass. Its
+  symbol-timing loop drifted up to ±1% while only noise arrived and could not
+  recover when the satellite rose, so a 26 Nov 2026 capture decoded 0 frames
+  although SatDump recovered 650. Timing is now limited to ±0.3% and restarts after
+  20 s without frames; the same capture decodes 231 frames. Decoder validation
+  adds a three-minute noise lead-in case.
 - A pass already overhead, or rising within the 5-minute setup time, stays in the
   plan from now, marked "Now" with a set-up-now note, instead of disappearing.
   Predictions start 30 minutes back so an in-progress pass keeps its real rise

@@ -48,9 +48,13 @@ CADU replay has no radio samples and explicitly leaves its spectrum empty.
   image pixels are compared with SatDump output in automated regression tests.
 - FM testing recovers a synthesized 1 kHz audio tone with >99% of steady-state
   energy at the expected frequency and verifies USB chunk-boundary continuity.
-- **Live RTL-SDR Blog V3 reception is not yet validated:** no dongle was connected.
-  No real on-air IQ capture or complete live Meteor pass has been tested here.
-  Generated IQ and a recorded-frame replay do not replace that field test.
+- A further check precedes the waveform with three minutes of noise, as a real pass
+  begins. The decoder restarts symbol timing after 20 s without frames, so timing
+  that drifts in the noise cannot persist into the pass (107 frames; 37 before).
+- **On-air capture:** a 26 Nov 2026 Meteor M2-4 pass (72.5°) recorded with an
+  RTL-SDR Blog V3 through this station. SatDump 1.2.2 decodes 650 frames from the
+  raw IQ; the station decoder decodes 231 frames offline from the same recording.
+  Live in-browser decoding with this decoder has not yet been tested on a pass.
 
 Direct `file://` execution could not be browser-tested because the automation
 browser blocks that URL scheme. Prefer the hosted URL for the first USB test.
