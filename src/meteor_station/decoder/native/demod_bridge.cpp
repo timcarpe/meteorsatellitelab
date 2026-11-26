@@ -11,6 +11,11 @@
 #include "vendor/meteordemod/DSP/mm.h"
 
 namespace {
+constexpr float SYMBOL_RATE = 72000.0f;
+// Symbol-rate range for the timing loop. Receiver and satellite clocks are within a
+// few hundred ppm; at ±1% the loop wandered to -0.8% in the noise before a pass
+// (26 Nov 2026 capture) and could not pull back once the signal arrived.
+constexpr float TIMING_LIMIT = 0.003f;
 std::unique_ptr<DSP::Agc> agc;
 std::unique_ptr<DSP::RRCFilter> rrc;
 std::unique_ptr<DSP::MeteorCostas> costas;
@@ -28,7 +33,13 @@ int radio_init(int rate) {
     const float deviation = 10000.0f * 2.0f * M_PI / sample_rate;
     costas = std::make_unique<DSP::MeteorCostas>(DSP::MeteorCostas::OQPSK,
         2.0f * M_PI * 100.0f / 72000.0f, 0, 0, -deviation, deviation);
-    timing = std::make_unique<DSP::MM>(sample_rate / 72000.0f, 1e-6f, 0.01f, 0.01f);
+    timing = std::make_unique<DSP::MM>(sample_rate / SYMBOL_RATE, 1e-6f, 0.01f, TIMING_LIMIT);
+    return 0;
+}
+/** Restart symbol timing from the nominal rate; carrier and gain loops keep their state. */
+int radio_reset_timing() {
+    if (!timing) return -1;
+    timing = std::make_unique<DSP::MM>(sample_rate / SYMBOL_RATE, 1e-6f, 0.01f, TIMING_LIMIT);
     return 0;
 }
 float radio_carrier_offset() {

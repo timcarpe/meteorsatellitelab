@@ -13,8 +13,35 @@ for (let offset = 0; offset < original.length; offset += 1024) {
   const f = original.subarray(offset, offset + 1024);
   expected.set(key(f), f);
 }
+/**
+ * A real pass starts in noise. Add Gaussian noise to the waveform and precede it with
+ * three minutes of noise only: symbol timing that drifts in the lead-in must recover.
+ */
+function noiseLeadIn(cu8, leadSeconds = 180) {
+  let seed = 7;
+  const uniform = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return (seed + 0.5) / 4294967296;
+  };
+  const gaussian = () =>
+    Math.sqrt(-2 * Math.log(uniform())) * Math.cos(2 * Math.PI * uniform());
+  let power = 0;
+  for (const byte of cu8) power += (byte - 127.5) ** 2;
+  const sigma = Math.sqrt(power / cu8.length); // per-component noise equal to signal power
+  const lead = leadSeconds * 288000 * 2;
+  const noisy = new Float32Array(lead + cu8.length);
+  for (let i = 0; i < noisy.length; i++)
+    noisy[i] = (i < lead ? 0 : cu8[i - lead] - 127.5) + sigma * gaussian();
+  let total = 0;
+  for (const value of noisy) total += value * value;
+  const scale = (0.05 * 127.5) / Math.sqrt((2 * total) / noisy.length);
+  return Buffer.from(
+    noisy.map((value) => Math.min(255, Math.max(0, Math.round(value * scale + 127.5)))),
+  );
+}
+
 const reports = [];
-for (const kind of ['soft', 'cu8', 'cu8-irregular', 'noise']) {
+for (const kind of ['soft', 'cu8', 'cu8-irregular', 'noise', 'cu8-after-noise']) {
   const mod = await createDecoder({ print: () => {}, printErr: console.error });
   if (mod._station_init(288000) !== 0) throw new Error('WASM initialization failed.');
   let random = 1234567;
@@ -26,7 +53,11 @@ for (const kind of ['soft', 'cu8', 'cu8-irregular', 'noise']) {
             return random >>> 24;
           }),
         )
-      : readFileSync(`build/fixtures/meteor-test.${kind === 'soft' ? 'soft' : 'cu8'}`);
+      : kind === 'cu8-after-noise'
+        ? noiseLeadIn(readFileSync('build/fixtures/meteor-test.cu8'))
+        : readFileSync(
+            `build/fixtures/meteor-test.${kind === 'soft' ? 'soft' : 'cu8'}`,
+          );
   const pointer = mod._malloc(65536);
   let decoded = 0,
     mismatch = 0;
@@ -95,7 +126,9 @@ writeFileSync(
 );
 if (
   reports.some((r) =>
-    r.input === 'noise' ? r.decoded !== 0 : r.decoded < 120 || r.mismatch > 0,
+    r.input === 'noise'
+      ? r.decoded !== 0
+      : r.decoded < (r.input === 'cu8-after-noise' ? 80 : 120) || r.mismatch > 0,
   ) ||
   reports[1].decodedSha256 !== reports[2].decodedSha256
 )
